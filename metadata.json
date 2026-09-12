@@ -1,0 +1,6 @@
+{
+  "name": "Registre CG & PC - Cartes Grises & Permis",
+  "description": "Système d'enregistrement, gestion des quittances, tableau de bord analytique et contrôle d'accès utilisateur sécurisé avec validation administrateur pour Cartes Grises (CG) et Permis de Conduire (PC).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
