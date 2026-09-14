@@ -7,7 +7,8 @@ import {
   initDatabase, 
   getDbStatus, 
   mapRowToRecord, 
-  mapRowToUser 
+  mapRowToUser,
+  closePool 
 } from './server/db.js';
 
 // Load default seeds as fallback if Neon DB is not yet populated
@@ -16,7 +17,13 @@ import { INITIAL_USERS } from './src/data/initialUsers.js';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // Port configuration:
+  // - In Render environments (RENDER=true), use process.env.PORT provided by Render (default 10000).
+  // - In AI Studio container, strictly bind to port 3000 as required by the reverse proxy.
+  const PORT = process.env.RENDER && process.env.PORT 
+    ? parseInt(process.env.PORT, 10) 
+    : 3000;
 
   app.use(express.json({ limit: '10mb' }));
 
@@ -33,10 +40,16 @@ async function startServer() {
   }
 
   // ----------------------------------------------------
-  // API: Healthcheck & Status
+  // API: Healthcheck & Status (Render Health Check Endpoint)
   // ----------------------------------------------------
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ 
+      status: 'ok', 
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      platform: process.env.RENDER ? 'render' : 'container',
+      environment: process.env.NODE_ENV || 'development'
+    });
   });
 
   app.get('/api/status', async (req, res) => {
@@ -473,9 +486,28 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running at http://0.0.0.0:${PORT} (Node ${process.version}, ${process.env.NODE_ENV || 'development'})`);
   });
+
+  // Graceful shutdown handling for Render zero-downtime deploys and SIGTERM/SIGINT
+  const handleShutdown = async (signal: string) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    server.close(async () => {
+      console.log('HTTP server closed.');
+      await closePool();
+      process.exit(0);
+    });
+
+    // Force close after 10s if hanging
+    setTimeout(() => {
+      console.error('Forced shutdown due to timeout');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
 startServer();

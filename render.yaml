@@ -1,0 +1,23 @@
+# ====================================================================
+# Render Blueprint Configuration (render.yaml)
+# Application: Registre CG & PC (Cartes Grises & Permis de Conduire)
+# ====================================================================
+
+services:
+  - type: web
+    name: registre-cg-pc
+    runtime: node
+    plan: free
+    region: frankfurt # Optimal low latency for Djibouti / EMEA / Europe
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      # Database connection string from Neon.tech (or Render PostgreSQL)
+      # Format: postgresql://[user]:[password]@[endpoint].neon.tech/[dbname]?sslmode=require
+      - key: DATABASE_URL
+        sync: false

@@ -11,7 +11,10 @@ import {
   Terminal, 
   HardDrive,
   UploadCloud,
-  ShieldCheck
+  ShieldCheck,
+  Rocket,
+  Server,
+  Code2
 } from 'lucide-react';
 import { api, DbStatusResponse } from '../services/api';
 import { RegistryRecord } from '../types';
@@ -111,9 +114,18 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
   onShowToast,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'neon' | 'render'>('render');
   const [dbStatus, setDbStatus] = useState<DbStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCmd(label);
+    onShowToast(`${label} copié !`);
+    setTimeout(() => setCopiedCmd(null), 2000);
+  };
 
   const checkStatus = async () => {
     setLoading(true);
@@ -213,6 +225,36 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
           </button>
         </div>
 
+        {/* Tab Switcher */}
+        <div className="flex border-b border-slate-200 bg-slate-100/80 px-6 pt-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('render')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-t border-x cursor-pointer ${
+              activeTab === 'render'
+                ? 'bg-white text-blue-700 border-slate-200 -mb-px shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-200/50'
+            }`}
+          >
+            <Rocket className="w-4 h-4 text-blue-600" />
+            <span>Déploiement Render (Render.com)</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800 font-semibold">Prêt</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('neon')}
+            className={`flex items-center space-x-2 px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-t border-x cursor-pointer ${
+              activeTab === 'neon'
+                ? 'bg-white text-slate-900 border-slate-200 -mb-px shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-200/50'
+            }`}
+          >
+            <Database className="w-4 h-4 text-slate-600" />
+            <span>Base PostgreSQL Neon & SQL</span>
+          </button>
+        </div>
+
         {/* Body content */}
         <div className="p-6 overflow-y-auto space-y-6 text-sm text-slate-700 flex-1">
           {/* Status Banner */}
@@ -230,7 +272,7 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
               <div>
                 <div className="font-bold text-sm">
                   {isConnected 
-                    ? 'Connexion PostgreSQL Neon active & opérationnelle' 
+                    ? 'Connexion PostgreSQL active & opérationnelle' 
                     : 'En attente de la variable DATABASE_URL'}
                 </div>
                 <div className="text-xs opacity-90 mt-0.5">
@@ -240,7 +282,9 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
                     </span>
                   ) : (
                     <span>
-                      Copiez le script SQL ci-dessous dans votre SQL Editor Neon, puis ajoutez votre <code>DATABASE_URL</code> dans les secrets.
+                      {activeTab === 'render' 
+                        ? 'Ajoutez DATABASE_URL dans les Environment Variables de votre service Render.'
+                        : 'Copiez le script SQL ci-dessous dans votre SQL Editor Neon, puis ajoutez votre DATABASE_URL.'}
                     </span>
                   )}
                 </div>
@@ -270,92 +314,254 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
             </div>
           </div>
 
-          {/* Step-by-Step Instructions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-              <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
-                <span>Ouvrir Neon Console</span>
-              </div>
-              <p className="text-xs text-slate-600 mb-2">
-                Connectez-vous sur Neon.tech, sélectionnez ou créez votre projet.
-              </p>
-              <a
-                href="https://console.neon.tech"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center space-x-1 text-xs text-blue-600 hover:underline font-semibold"
-              >
-                <span>console.neon.tech</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-              <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">2</span>
-                <span>Exécuter le Script SQL</span>
-              </div>
-              <p className="text-xs text-slate-600 mb-2">
-                Allez dans l'onglet <strong>SQL Editor</strong>, collez le script ci-dessous et cliquez sur <strong>Run</strong>.
-              </p>
-              <button
-                onClick={handleCopySql}
-                className="inline-flex items-center space-x-1 text-xs text-emerald-700 font-semibold hover:underline cursor-pointer"
-              >
-                <Copy className="w-3 h-3" />
-                <span>Copier le script SQL</span>
-              </button>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-              <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">3</span>
-                <span>Renseigner DATABASE_URL</span>
-              </div>
-              <p className="text-xs text-slate-600">
-                Copiez votre chaîne de connexion (Connection string) PostgreSQL et placez-la dans les variables d'environnement.
-              </p>
-            </div>
-          </div>
-
-          {/* SQL Editor Block with 1-click copy */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
-                <Terminal className="w-4 h-4 text-blue-600" />
-                <span>Script SQL de Création des Tables (DDL Postgres)</span>
+          {activeTab === 'render' ? (
+            /* TAB: RENDER DEPLOYMENT */
+            <div className="space-y-6">
+              {/* Ready banner */}
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 bg-blue-600 text-white rounded-lg shrink-0">
+                    <Rocket className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-blue-900">Application 100% prête pour déploiement sur Render</h3>
+                    <p className="text-xs text-blue-800/90 mt-1 leading-relaxed">
+                      Le fichier Blueprint <code>render.yaml</code> est présent à la racine de votre projet.
+                      Vous pouvez déployer directement en connectant votre dépôt GitHub sur Render, ou créer un Web Service Node manuellement.
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <button
-                id="btn-copy-neon-sql"
-                onClick={handleCopySql}
-                className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer ${
-                  copied 
-                    ? 'bg-emerald-600 text-white' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Copié avec succès !</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copier le Script SQL</span>
-                  </>
-                )}
-              </button>
-            </div>
+              {/* Render Web Service Parameters Table */}
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Server className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Paramètres du Web Service Render</span>
+                  </div>
+                  <a
+                    href="https://dashboard.render.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center space-x-1 text-xs text-blue-600 hover:underline font-semibold"
+                  >
+                    <span>dashboard.render.com</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
 
-            <div className="relative rounded-xl overflow-hidden border border-slate-800 shadow-md">
-              <pre className="bg-slate-950 text-slate-200 p-4 text-xs font-mono overflow-x-auto max-h-72 leading-relaxed selection:bg-blue-700 selection:text-white">
-                <code>{NEON_SQL_SCRIPT}</code>
-              </pre>
+                <div className="divide-y divide-slate-100 text-xs">
+                  <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Service Type</span>
+                      <span className="text-slate-500">Web Service (Node.js)</span>
+                    </div>
+                    <code className="bg-slate-100 text-slate-800 px-2 py-1 rounded font-mono">Web Service</code>
+                  </div>
+
+                  <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Commande de Build (Build Command)</span>
+                      <span className="text-slate-500">Compile le frontend Vite et le serveur esbuild</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <code className="bg-slate-100 text-blue-800 px-2.5 py-1 rounded font-mono font-medium">npm install --include=dev &amp;&amp; npm run build</code>
+                      <button
+                        onClick={() => handleCopyText('npm install --include=dev && npm run build', 'Build Command')}
+                        className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                      >
+                        {copiedCmd === 'Build Command' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Commande de Démarrage (Start Command)</span>
+                      <span className="text-slate-500">Lance le serveur de production optimisé</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <code className="bg-slate-100 text-blue-800 px-2.5 py-1 rounded font-mono font-medium">npm start</code>
+                      <button
+                        onClick={() => handleCopyText('npm start', 'Start Command')}
+                        className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                      >
+                        {copiedCmd === 'Start Command' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Health Check Path</span>
+                      <span className="text-slate-500">Vérification de disponibilité sans temps d'arrêt</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <code className="bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded font-mono font-medium">/api/health</code>
+                      <button
+                        onClick={() => handleCopyText('/api/health', 'Health Check Path')}
+                        className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                      >
+                        {copiedCmd === 'Health Check Path' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Région Recommandée</span>
+                      <span className="text-slate-500">Faible latence pour Djibouti, Afrique de l'Est et Europe</span>
+                    </div>
+                    <span className="font-semibold text-slate-800">Frankfurt (EU Central)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Environment Variables on Render */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  <Code2 className="w-4 h-4 text-indigo-600" />
+                  <span>Variables d'Environnement à Configurer sur Render</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900 font-mono text-xs">NODE_ENV</span>
+                      <button
+                        onClick={() => handleCopyText('production', 'NODE_ENV')}
+                        className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        {copiedCmd === 'NODE_ENV' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <code className="text-xs text-blue-600 font-mono">production</code>
+                    <p className="text-[11px] text-slate-500 mt-1">Active la compression et le cache statique.</p>
+                  </div>
+
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900 font-mono text-xs">DATABASE_URL</span>
+                      <button
+                        onClick={() => handleCopyText('postgresql://user:password@ep-xyz.eu-central-1.aws.neon.tech/neondb?sslmode=require', 'DATABASE_URL')}
+                        className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        {copiedCmd === 'DATABASE_URL' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    <code className="text-xs text-slate-600 font-mono truncate block">postgresql://...neon.tech/neondb?sslmode=require</code>
+                    <p className="text-[11px] text-slate-500 mt-1">Chaîne de connexion PostgreSQL de Neon Tech.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Automatic Super-Admin Credentials reminder */}
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                <div className="font-bold mb-1 flex items-center space-x-1.5">
+                  <ShieldCheck className="w-4 h-4 text-amber-700" />
+                  <span>Compte Super-Administrateur Initial (Créé automatiquement au 1er boot) :</span>
+                </div>
+                <div className="mt-1 space-y-0.5 text-amber-800">
+                  <div>Email : <strong>mahdiyacoubali318@gmail.com</strong></div>
+                  <div>Mot de passe : <strong>MAHDI8006</strong></div>
+                  <div className="text-[11px] text-amber-700 mt-1">
+                    Ce compte bénéficie de tous les privilèges ADMIN pour valider les nouveaux agents et gérer le registre.
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* TAB: NEON SQL & DDL */
+            <div className="space-y-6">
+              {/* Step-by-Step Instructions */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
+                    <span>Ouvrir Neon Console</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-2">
+                    Connectez-vous sur Neon.tech, sélectionnez ou créez votre projet.
+                  </p>
+                  <a
+                    href="https://console.neon.tech"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center space-x-1 text-xs text-blue-600 hover:underline font-semibold"
+                  >
+                    <span>console.neon.tech</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">2</span>
+                    <span>Exécuter le Script SQL</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-2">
+                    Allez dans l'onglet <strong>SQL Editor</strong>, collez le script ci-dessous et cliquez sur <strong>Run</strong>.
+                  </p>
+                  <button
+                    onClick={handleCopySql}
+                    className="inline-flex items-center space-x-1 text-xs text-emerald-700 font-semibold hover:underline cursor-pointer"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copier le script SQL</span>
+                  </button>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">3</span>
+                    <span>Renseigner DATABASE_URL</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Copiez votre chaîne de connexion (Connection string) PostgreSQL et placez-la dans les variables d'environnement.
+                  </p>
+                </div>
+              </div>
+
+              {/* SQL Editor Block with 1-click copy */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    <Terminal className="w-4 h-4 text-blue-600" />
+                    <span>Script SQL de Création des Tables (DDL Postgres)</span>
+                  </div>
+
+                  <button
+                    id="btn-copy-neon-sql"
+                    onClick={handleCopySql}
+                    className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                      copied 
+                        ? 'bg-emerald-600 text-white' 
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Copié avec succès !</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copier le Script SQL</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="relative rounded-xl overflow-hidden border border-slate-800 shadow-md">
+                  <pre className="bg-slate-950 text-slate-200 p-4 text-xs font-mono overflow-x-auto max-h-72 leading-relaxed selection:bg-blue-700 selection:text-white">
+                    <code>{NEON_SQL_SCRIPT}</code>
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -372,13 +578,23 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
             >
               Fermer
             </button>
-            <button
-              onClick={handleCopySql}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-xs cursor-pointer flex items-center space-x-1.5"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copier le Script SQL</span>
-            </button>
+            {activeTab === 'neon' ? (
+              <button
+                onClick={handleCopySql}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-xs cursor-pointer flex items-center space-x-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copier le Script SQL</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleCopyText('npm install --include=dev && npm run build', 'Commande de Build')}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-xs cursor-pointer flex items-center space-x-1.5"
+              >
+                {copiedCmd === 'Commande de Build' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>Copier Commande Build</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

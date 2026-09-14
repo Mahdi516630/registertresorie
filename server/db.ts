@@ -40,6 +40,19 @@ export function getPool(): pg.Pool | null {
   }
 }
 
+export async function closePool(): Promise<void> {
+  if (pool) {
+    try {
+      await pool.end();
+      pool = null;
+      isConnected = false;
+      console.log('PostgreSQL Pool closed gracefully');
+    } catch (err: any) {
+      console.error('Error closing PostgreSQL pool:', err);
+    }
+  }
+}
+
 export async function initDatabase(): Promise<{ success: boolean; message: string }> {
   const p = getPool();
   if (!p) {
