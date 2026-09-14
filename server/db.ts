@@ -1,41 +1,69 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
-dotenv.config();
+import { getLocalRecords, getLocalUsers, saveLocalRecords, saveLocalUsers } from './localStore.js';
+import { RegistryRecord, AppUser } from '../src/types.js';
+
+dotenv.config({ override: true });
 
 const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
 let isConnected = false;
 let connectionError: string | null = null;
+let customConnectionString: string | null = null;
+
+export function getActiveConnectionString(): string | null {
+  let url = customConnectionString || process.env.DATABASE_URL || null;
+  if (url) {
+    url = url.trim();
+    if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+      url = url.slice(1, -1).trim();
+    }
+  }
+  return url || null;
+}
+
+export function isPostgresConnected(): boolean {
+  return isConnected && pool !== null;
+}
+
+export function getConnectionError(): string | null {
+  return connectionError;
+}
 
 export function getPool(): pg.Pool | null {
-  if (pool) return pool;
+  if (pool && isConnected) return pool;
+  if (pool && !isConnected) return null; // Prevent hammering known failed connection
 
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString || connectionString.trim() === '') {
+  const connStr = getActiveConnectionString();
+  if (!connStr || connStr.trim() === '') {
     connectionError = 'Variable DATABASE_URL non configurée';
+    isConnected = false;
     return null;
   }
 
   try {
     pool = new Pool({
-      connectionString: connectionString.trim(),
+      connectionString: connStr.trim(),
       ssl: {
         rejectUnauthorized: false, // Required for Neon cloud PostgreSQL
       },
-      connectionTimeoutMillis: 8000,
-      max: 10,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+      max: 20,
     });
 
     pool.on('error', (err) => {
-      console.error('PostgreSQL Pool error:', err.message);
+      console.warn('PostgreSQL Pool background warning:', err.message);
       connectionError = err.message;
+      isConnected = false;
     });
 
     return pool;
   } catch (err: any) {
-    console.error('Failed to create PostgreSQL pool:', err);
+    console.warn('Failed to create PostgreSQL pool:', err?.message || err);
     connectionError = err?.message || 'Erreur d\'initialisation du pool PostgreSQL';
+    isConnected = false;
     return null;
   }
 }
@@ -44,26 +72,48 @@ export async function closePool(): Promise<void> {
   if (pool) {
     try {
       await pool.end();
+    } catch (err: any) {
+      console.warn('Error closing PostgreSQL pool:', err?.message || err);
+    } finally {
       pool = null;
       isConnected = false;
-      console.log('PostgreSQL Pool closed gracefully');
-    } catch (err: any) {
-      console.error('Error closing PostgreSQL pool:', err);
     }
   }
 }
 
 export async function initDatabase(): Promise<{ success: boolean; message: string }> {
-  const p = getPool();
-  if (!p) {
+  const connStr = getActiveConnectionString();
+  if (!connStr || connStr.trim() === '') {
+    isConnected = false;
+    connectionError = 'DATABASE_URL non configurée';
     return { 
       success: false, 
-      message: connectionError || 'Aucune chaîne DATABASE_URL trouvée dans l\'environnement.' 
+      message: 'DATABASE_URL non configurée dans l\'environnement.' 
     };
   }
 
+  // Create a clean pool instance to test
+  if (pool) {
+    await closePool();
+  }
+
   try {
-    const client = await p.connect();
+    const newPool = new Pool({
+      connectionString: connStr.trim(),
+      ssl: {
+        rejectUnauthorized: false,
+      },
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+      max: 20,
+    });
+
+    newPool.on('error', (err) => {
+      connectionError = err.message;
+      isConnected = false;
+    });
+
+    const client = await newPool.connect();
     try {
       // 1. Users table
       await client.query(`
@@ -106,11 +156,24 @@ export async function initDatabase(): Promise<{ success: boolean; message: strin
         );
       `);
 
-      // 3. Ensure indexes
+      // 3. Ensure high-performance indexes
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+        CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+        CREATE INDEX IF NOT EXISTS idx_records_serial ON records(num_serial);
+        CREATE INDEX IF NOT EXISTS idx_records_name ON records(name);
         CREATE INDEX IF NOT EXISTS idx_records_type ON records(record_type);
+        CREATE INDEX IF NOT EXISTS idx_records_cg_type ON records(cg_type);
+        CREATE INDEX IF NOT EXISTS idx_records_pc_type ON records(pc_type);
+        CREATE INDEX IF NOT EXISTS idx_records_num_cars ON records(num_cars);
         CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
+        CREATE INDEX IF NOT EXISTS idx_records_quittance ON records(num_quittance);
+        CREATE INDEX IF NOT EXISTS idx_records_quittance1 ON records(num_quittance1);
+        CREATE INDEX IF NOT EXISTS idx_records_quittance2 ON records(num_quittance2);
+        CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at);
+        CREATE INDEX IF NOT EXISTS idx_records_date_created ON records(date DESC, created_at DESC);
       `);
 
       // 4. Ensure Super-Admin exists
@@ -136,36 +199,141 @@ export async function initDatabase(): Promise<{ success: boolean; message: strin
           status = 'APPROVED';
       `);
 
+      pool = newPool;
       isConnected = true;
       connectionError = null;
+      console.log('PostgreSQL Neon connecté et initialisé avec succès !');
       return { success: true, message: 'Base de données PostgreSQL Neon initialisée et connectée avec succès !' };
     } finally {
       client.release();
     }
   } catch (err: any) {
-    console.error('Database connection / init failed:', err.message);
+    const isAuthError = err.message?.includes('password authentication failed') || err.code === '28P01';
+    const friendlyMsg = isAuthError
+      ? `Authentification Neon échouée (mot de passe invalide pour '${err.message?.split('for user')?.[1]?.trim() || 'neondb_owner'}')`
+      : `Connexion Neon échouée: ${err.message}`;
+    
+    console.warn(`[Base de données] ${friendlyMsg}. Bascule automatique sur le stockage local persistant.`);
     isConnected = false;
-    connectionError = err.message;
-    return { success: false, message: `Connexion Neon échouée: ${err.message}` };
+    connectionError = friendlyMsg;
+    await closePool();
+    return { success: false, message: friendlyMsg };
+  }
+}
+
+export async function testAndSetDatabaseUrl(newUrl: string): Promise<{ success: boolean; message: string }> {
+  if (!newUrl || !newUrl.trim()) {
+    return { success: false, message: 'Veuillez saisir une URL de connexion valide.' };
+  }
+
+  const cleanUrl = newUrl.trim();
+  customConnectionString = cleanUrl;
+
+  const initResult = await initDatabase();
+  if (initResult.success) {
+    // Sync local records if any into newly connected Neon DB
+    try {
+      await syncLocalToNeon();
+    } catch (e: any) {
+      console.warn('Sync local data to Neon error:', e.message);
+    }
+    return { success: true, message: 'Connexion établie avec succès à la base PostgreSQL Neon !' };
+  } else {
+    // Revert if failed
+    customConnectionString = null;
+    return { success: false, message: initResult.message };
+  }
+}
+
+export async function syncLocalToNeon(): Promise<{ success: boolean; recordsCount: number; message: string }> {
+  if (!isPostgresConnected() || !pool) {
+    return { success: false, recordsCount: 0, message: 'PostgreSQL Neon non connecté.' };
+  }
+
+  const records = getLocalRecords();
+  if (records.length === 0) {
+    return { success: true, recordsCount: 0, message: 'Aucun dossier local à synchroniser.' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let synced = 0;
+    for (const record of records) {
+      const query = `
+        INSERT INTO records (
+          id, record_type, num_serial, name, montant, date, created_at, notes,
+          cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
+          pc_type, categories, num_quittance
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        ON CONFLICT (id) DO UPDATE SET
+          montant = EXCLUDED.montant,
+          date = EXCLUDED.date,
+          name = EXCLUDED.name,
+          notes = EXCLUDED.notes;
+      `;
+
+      const anyR = record as any;
+      const values = [
+        record.id,
+        record.recordType,
+        record.numSerial,
+        record.name,
+        record.montant,
+        record.date,
+        record.createdAt || new Date().toISOString(),
+        record.notes || null,
+        anyR.cv || null,
+        record.type && record.recordType === 'CG' ? record.type : null,
+        anyR.numCars || null,
+        anyR.montantCV || 0,
+        anyR.montantDossier || 0,
+        anyR.numQuittance1 || null,
+        anyR.numQuittance2 || null,
+        record.type && record.recordType === 'PC' ? record.type : null,
+        anyR.categories || [],
+        anyR.numQuittance || null,
+      ];
+
+      await client.query(query, values);
+      synced++;
+    }
+    await client.query('COMMIT');
+    return { success: true, recordsCount: synced, message: `${synced} dossiers synchronisés vers Neon avec succès !` };
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    return { success: false, recordsCount: 0, message: err.message };
+  } finally {
+    client.release();
   }
 }
 
 export async function getDbStatus() {
-  const p = getPool();
-  if (!p) {
+  const localRecords = getLocalRecords();
+  const localUsers = getLocalUsers();
+
+  if (!isPostgresConnected() || !pool) {
+    if (getActiveConnectionString() && !connectionError) {
+      await initDatabase();
+    }
+  }
+
+  if (!isPostgresConnected() || !pool) {
     return {
       connected: false,
-      database: 'none',
-      message: connectionError || 'DATABASE_URL non configurée',
-      recordCount: 0,
-      userCount: 0,
+      database: 'local_fallback',
+      message: connectionError || 'DATABASE_URL non configurée ou mot de passe expiré (Stockage local persistant actif)',
+      recordCount: localRecords.length,
+      userCount: localUsers.length,
+      neonError: connectionError,
     };
   }
 
   try {
-    const resTest = await p.query('SELECT NOW() as now_time');
-    const recordsCountRes = await p.query('SELECT COUNT(*) as count FROM records');
-    const usersCountRes = await p.query('SELECT COUNT(*) as count FROM users');
+    const resTest = await pool.query('SELECT NOW() as now_time');
+    const recordsCountRes = await pool.query('SELECT COUNT(*) as count FROM records');
+    const usersCountRes = await pool.query('SELECT COUNT(*) as count FROM users');
 
     return {
       connected: true,
@@ -176,12 +344,15 @@ export async function getDbStatus() {
       message: 'Connecté en direct à PostgreSQL Neon (Données Réelles)',
     };
   } catch (err: any) {
+    isConnected = false;
+    connectionError = err.message;
     return {
       connected: false,
-      database: 'error',
-      message: `Erreur requête Neon: ${err.message}`,
-      recordCount: 0,
-      userCount: 0,
+      database: 'local_fallback',
+      message: `Erreur Neon: ${err.message}`,
+      recordCount: localRecords.length,
+      userCount: localUsers.length,
+      neonError: err.message,
     };
   }
 }
@@ -239,3 +410,15 @@ export function mapRowToUser(row: any): any {
     approvedBy: row.approved_by || undefined,
   };
 }
+
+export async function isDbAlive(): Promise<boolean> {
+  const p = getPool();
+  if (!p) return false;
+  try {
+    const res = await p.query('SELECT 1');
+    return !!res;
+  } catch {
+    return false;
+  }
+}
+

@@ -14,7 +14,9 @@ import {
   Calendar,
   Layers,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { 
   RegistryRecord, 
@@ -54,9 +56,10 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
   const [sortField, setSortField] = useState<'date' | 'numSerial' | 'name' | 'montant'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Pagination
+  // Pagination & Display limit (optimized for up to 50,000 records)
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState<number>(50);
+  const [pageInput, setPageInput] = useState<string>('1');
 
   // Available years from dataset
   const availableYears = useMemo(() => {
@@ -167,6 +170,22 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
     return sortedRecords.slice(start, start + itemsPerPage);
   }, [sortedRecords, currentPage, itemsPerPage]);
 
+  const goToPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(page, totalPages));
+    setCurrentPage(clamped);
+    setPageInput(String(clamped));
+  };
+
+  const handlePageInputSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const p = parseInt(pageInput, 10);
+    if (!isNaN(p)) {
+      goToPage(p);
+    } else {
+      setPageInput(String(currentPage));
+    }
+  };
+
   const handleSort = (field: 'date' | 'numSerial' | 'name' | 'montant') => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -183,7 +202,7 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
     setSelectedYear('ALL');
     setSelectedMonth('ALL');
     setSelectedCategory('ALL');
-    setCurrentPage(1);
+    goToPage(1);
   };
 
   const hasActiveFilters =
@@ -672,44 +691,96 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
           </table>
         </div>
 
-        {/* Table Footer with Pagination */}
-        <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <div>
-            Affichage de{' '}
-            <strong className="text-slate-800 font-semibold">
-              {paginatedRecords.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}
-            </strong>{' '}
-            à{' '}
-            <strong className="text-slate-800 font-semibold">
-              {Math.min(currentPage * itemsPerPage, sortedRecords.length)}
-            </strong>{' '}
-            sur <strong className="text-slate-800 font-semibold">{sortedRecords.length}</strong> dossiers
-            {sortedRecords.length !== records.length && ` (filtrés sur ${records.length} au total)`}
+        {/* Table Footer with Pagination & 50,000-records scale controls */}
+        <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-3">
+            <div>
+              Affichage de{' '}
+              <strong className="text-slate-800 font-semibold">
+                {paginatedRecords.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}
+              </strong>{' '}
+              à{' '}
+              <strong className="text-slate-800 font-semibold">
+                {Math.min(currentPage * itemsPerPage, sortedRecords.length)}
+              </strong>{' '}
+              sur <strong className="text-slate-800 font-semibold">{sortedRecords.length.toLocaleString('fr-FR')}</strong> dossiers
+              {sortedRecords.length !== records.length && ` (sur ${records.length.toLocaleString('fr-FR')} au total)`}
+            </div>
+
+            <div className="flex items-center space-x-1.5 pl-2 border-l border-slate-300">
+              <span className="text-slate-600">Par page :</span>
+              <select
+                aria-label="Nombre de dossiers par page"
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  goToPage(1);
+                }}
+                className="bg-white border border-slate-300 text-slate-800 rounded px-2 py-1 text-xs font-semibold focus:ring-1 focus:ring-blue-500 cursor-pointer"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={250}>250</option>
+                <option value={500}>500</option>
+              </select>
+            </div>
           </div>
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1.5">
               <button
                 type="button"
                 disabled={currentPage === 1}
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                onClick={() => goToPage(1)}
+                title="Première page"
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => goToPage(currentPage - 1)}
+                title="Page précédente"
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               
-              <span className="px-2 font-medium text-slate-700">
-                Page {currentPage} sur {totalPages}
-              </span>
+              <form onSubmit={handlePageInputSubmit} className="flex items-center space-x-1 px-1">
+                <span className="text-slate-600">Page</span>
+                <input
+                  type="text"
+                  aria-label="Aller à la page"
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onBlur={handlePageInputSubmit}
+                  className="w-12 text-center py-0.5 px-1 bg-white border border-slate-300 rounded font-semibold text-slate-800 text-xs focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-slate-600">sur {totalPages.toLocaleString('fr-FR')}</span>
+              </form>
 
               <button
                 type="button"
                 disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                onClick={() => goToPage(currentPage + 1)}
+                title="Page suivante"
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() => goToPage(totalPages)}
+                title="Dernière page"
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronsRight className="w-4 h-4" />
               </button>
             </div>
           )}

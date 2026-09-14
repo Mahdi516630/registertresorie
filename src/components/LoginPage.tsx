@@ -18,10 +18,11 @@ import {
 } from 'lucide-react';
 import { AppUser } from '../types';
 import { ADMIN_EMAIL, ADMIN_DEFAULT_PASS } from '../data/initialUsers';
+import { api } from '../services/api';
 
 interface LoginPageProps {
   onLogin: (user: AppUser) => void;
-  onRegister: (newUser: AppUser) => { success: boolean; message: string };
+  onRegister: (newUser: AppUser) => Promise<{ success: boolean; message: string }> | { success: boolean; message: string };
   users: AppUser[];
   onOpenDbModal?: () => void;
   isDbConnected?: boolean;
@@ -55,41 +56,50 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [regSuccess, setRegSuccess] = useState<string | null>(null);
 
   // Handle Login Submit
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
     setLoginNotice(null);
+    setIsLoggingIn(true);
 
     const emailClean = loginEmail.trim().toLowerCase();
-    const foundUser = users.find((u) => u.email.toLowerCase() === emailClean);
 
-    if (!foundUser) {
-      setLoginError("Aucun compte n'est associé à cette adresse e-mail.");
-      return;
+    try {
+      // Direct PostgreSQL Neon Authentication
+      const result = await api.login(emailClean, loginPassword);
+      if (result.success && result.user) {
+        onLogin(result.user);
+        return;
+      }
+    } catch (err: any) {
+      // Fallback check on users array if already loaded from DB
+      const foundUser = users.find((u) => u.email.toLowerCase() === emailClean);
+      if (foundUser && foundUser.password === loginPassword) {
+        if (foundUser.status === 'PENDING') {
+          setLoginError(
+            "Connexion refusée : Votre compte est en attente d'approbation par l'administrateur (Mahdi). Vous ne pouvez pas vous connecter tant que votre accès n'a pas été validé."
+          );
+          setIsLoggingIn(false);
+          return;
+        }
+        if (foundUser.status === 'REJECTED') {
+          setLoginError(
+            "Accès bloqué : Votre compte a été suspendu ou révoqué par l'administrateur."
+          );
+          setIsLoggingIn(false);
+          return;
+        }
+        onLogin(foundUser);
+        setIsLoggingIn(false);
+        return;
+      }
+
+      setLoginError(err.message || "Identifiants invalides ou connexion à la base échouée.");
+    } finally {
+      setIsLoggingIn(false);
     }
-
-    if (foundUser.password !== loginPassword) {
-      setLoginError("Mot de passe incorrect. Veuillez vérifier votre saisie.");
-      return;
-    }
-
-    // Check authorization status
-    if (foundUser.status === 'PENDING') {
-      setLoginError(
-        "Connexion refusée : Votre compte est en attente d'approbation par l'administrateur (Mahdi). Vous ne pouvez pas vous connecter tant que votre accès n'a pas été validé."
-      );
-      return;
-    }
-
-    if (foundUser.status === 'REJECTED') {
-      setLoginError(
-        "Accès bloqué : Votre compte a été suspendu ou révoqué par l'administrateur."
-      );
-      return;
-    }
-
-    // Approved user
-    onLogin(foundUser);
   };
 
   // Handle Register Submit
@@ -241,7 +251,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <span>
                   {isDbConnected 
                     ? 'Postgres Neon : Connecté (Données réelles)' 
-                    : 'Postgres Neon : Mode Simulation (Cliquer pour connecter)'}
+                    : 'Postgres Neon : Connexion Obligatoire (Cliquer pour configurer)'}
                 </span>
               </div>
               <span className="text-[11px] underline text-slate-300 hover:text-white">

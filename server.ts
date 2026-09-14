@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -7,13 +10,20 @@ import {
   initDatabase, 
   getDbStatus, 
   mapRowToRecord, 
-  mapRowToUser,
-  closePool 
+  mapRowToUser, 
+  closePool,
+  isPostgresConnected,
+  testAndSetDatabaseUrl,
+  syncLocalToNeon,
+  getActiveConnectionString
 } from './server/db.js';
-
-// Load default seeds as fallback if Neon DB is not yet populated
-import { INITIAL_REGISTRY_DATA } from './src/data/initialData.js';
-import { INITIAL_USERS } from './src/data/initialUsers.js';
+import {
+  getLocalRecords,
+  saveLocalRecords,
+  getLocalUsers,
+  saveLocalUsers
+} from './server/localStore.js';
+import { RegistryRecord, AppUser } from './src/types.js';
 
 async function startServer() {
   const app = express();
@@ -27,16 +37,18 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
-  // Initialize DB if DATABASE_URL is present
-  if (process.env.DATABASE_URL) {
-    console.log('Connecting to PostgreSQL Neon database...');
-    initDatabase().then((res) => {
+  // Initialize DB if DATABASE_URL or active connection string is present
+  const connStr = getActiveConnectionString();
+  if (connStr) {
+    console.log('Vérification de la connexion à la base de données PostgreSQL Neon...');
+    try {
+      const res = await initDatabase();
       console.log(res.message);
-    }).catch((err) => {
-      console.error('Init DB error:', err);
-    });
+    } catch (err: any) {
+      console.warn('Initialisation DB en arrière-plan:', err.message || err);
+    }
   } else {
-    console.log('DATABASE_URL not set in environment. Running in transitional mode.');
+    console.log('DATABASE_URL non configurée dans l\'environnement. Mode local actif.');
   }
 
   // ----------------------------------------------------
@@ -58,6 +70,30 @@ async function startServer() {
       res.json(status);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dynamic Neon Database Configuration Endpoint
+  app.post('/api/db/config', async (req, res) => {
+    try {
+      const { connectionString } = req.body;
+      if (!connectionString) {
+        return res.status(400).json({ success: false, message: 'Chaîne de connexion requise' });
+      }
+      const result = await testAndSetDatabaseUrl(connectionString);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // Sync Local Records to Neon Endpoint
+  app.post('/api/db/sync', async (req, res) => {
+    try {
+      const result = await syncLocalToNeon();
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
     }
   });
 
@@ -90,329 +126,581 @@ async function startServer() {
   // API: Records (Cartes Grises & Permis)
   // ----------------------------------------------------
   app.get('/api/records', async (req, res) => {
-    const pool = getPool();
-    if (pool) {
-      try {
-        const result = await pool.query('SELECT * FROM records ORDER BY date DESC, created_at DESC');
-        const records = result.rows.map(mapRowToRecord);
-        return res.json({ source: 'neon', records });
-      } catch (err: any) {
-        console.error('Error fetching records from Neon:', err.message);
-        // Fallback response with error info
-        return res.status(500).json({ error: err.message });
+    const { limit, offset, search, recordType, year, month } = req.query;
+
+    // If PostgreSQL Neon is connected, try reading directly from it
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const conditions: string[] = [];
+          const params: any[] = [];
+          let paramIdx = 1;
+
+          if (recordType && recordType !== 'ALL') {
+            conditions.push(`record_type = $${paramIdx++}`);
+            params.push(recordType);
+          }
+
+          if (year && year !== 'ALL') {
+            conditions.push(`EXTRACT(YEAR FROM date) = $${paramIdx++}`);
+            params.push(parseInt(year as string, 10));
+          }
+
+          if (month && month !== 'ALL') {
+            conditions.push(`EXTRACT(MONTH FROM date) = $${paramIdx++}`);
+            params.push(parseInt(month as string, 10));
+          }
+
+          if (search && typeof search === 'string' && search.trim()) {
+            const q = `%${search.trim().toLowerCase()}%`;
+            conditions.push(`(
+              LOWER(num_serial) LIKE $${paramIdx} OR 
+              LOWER(name) LIKE $${paramIdx} OR 
+              LOWER(COALESCE(num_cars, '')) LIKE $${paramIdx} OR 
+              LOWER(COALESCE(num_quittance, '')) LIKE $${paramIdx} OR 
+              LOWER(COALESCE(num_quittance1, '')) LIKE $${paramIdx} OR 
+              LOWER(COALESCE(num_quittance2, '')) LIKE $${paramIdx}
+            )`);
+            params.push(q);
+            paramIdx++;
+          }
+
+          const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+          const countResult = await pool.query(`SELECT COUNT(*) as count FROM records ${whereClause}`, params);
+          const totalCount = parseInt(countResult.rows[0]?.count || '0', 10);
+
+          let query = `SELECT * FROM records ${whereClause} ORDER BY date DESC, created_at DESC`;
+          if (limit && limit !== 'all') {
+            const parsedLimit = parseInt(limit as string, 10);
+            const parsedOffset = offset ? parseInt(offset as string, 10) : 0;
+            query += ` LIMIT ${parsedLimit} OFFSET ${parsedOffset}`;
+          }
+
+          const result = await pool.query(query, params);
+          const records = result.rows.map(mapRowToRecord);
+
+          return res.json({ 
+            source: 'neon', 
+            records, 
+            totalCount,
+            count: records.length 
+          });
+        } catch (err: any) {
+          console.warn('Neon query failed, using local storage:', err.message);
+        }
       }
     }
-    // If not connected to Neon
-    return res.json({ source: 'local', records: INITIAL_REGISTRY_DATA, message: 'DATABASE_URL non configurée' });
-  });
 
-  app.post('/api/records', async (req, res) => {
-    const record = req.body;
-    const pool = getPool();
-
-    if (!pool) {
-      return res.status(400).json({ 
-        error: 'DATABASE_URL non configurée. Impossible d\'écrire dans PostgreSQL Neon.' 
-      });
-    }
-
+    // Resilient Fallback to Local Persistent Store
     try {
-      const query = `
-        INSERT INTO records (
-          id, record_type, num_serial, name, montant, date, created_at, notes,
-          cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
-          pc_type, categories, num_quittance
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-        RETURNING *;
-      `;
+      let records = getLocalRecords();
 
-      const values = [
-        record.id,
-        record.recordType,
-        record.numSerial,
-        record.name,
-        record.montant,
-        record.date,
-        record.createdAt || new Date().toISOString(),
-        record.notes || null,
-        record.cv || null,
-        record.type && record.recordType === 'CG' ? record.type : null,
-        record.numCars || null,
-        record.montantCV || 0,
-        record.montantDossier || 0,
-        record.numQuittance1 || null,
-        record.numQuittance2 || null,
-        record.type && record.recordType === 'PC' ? record.type : null,
-        record.categories || [],
-        record.numQuittance || null,
-      ];
+      if (recordType && recordType !== 'ALL') {
+        records = records.filter(r => r.recordType === recordType);
+      }
 
-      const result = await pool.query(query, values);
-      return res.status(201).json(mapRowToRecord(result.rows[0]));
+      if (year && year !== 'ALL') {
+        const y = parseInt(year as string, 10);
+        records = records.filter(r => r.date && new Date(r.date).getFullYear() === y);
+      }
+
+      if (month && month !== 'ALL') {
+        const m = parseInt(month as string, 10);
+        records = records.filter(r => r.date && new Date(r.date).getMonth() + 1 === m);
+      }
+
+      if (search && typeof search === 'string' && search.trim()) {
+        const s = search.trim().toLowerCase();
+        records = records.filter(r => {
+          const anyR = r as any;
+          return (
+            (r.numSerial && r.numSerial.toLowerCase().includes(s)) ||
+            (r.name && r.name.toLowerCase().includes(s)) ||
+            (anyR.numCars && anyR.numCars.toLowerCase().includes(s)) ||
+            (anyR.numQuittance && anyR.numQuittance.toLowerCase().includes(s)) ||
+            (anyR.numQuittance1 && anyR.numQuittance1.toLowerCase().includes(s)) ||
+            (anyR.numQuittance2 && anyR.numQuittance2.toLowerCase().includes(s))
+          );
+        });
+      }
+
+      // Sort by date desc
+      records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      const totalCount = records.length;
+      let pagedRecords = records;
+      if (limit && limit !== 'all') {
+        const parsedLimit = parseInt(limit as string, 10);
+        const parsedOffset = offset ? parseInt(offset as string, 10) : 0;
+        pagedRecords = records.slice(parsedOffset, parsedOffset + parsedLimit);
+      }
+
+      return res.json({
+        source: 'local_fallback',
+        records: pagedRecords,
+        totalCount,
+        count: pagedRecords.length
+      });
     } catch (err: any) {
-      console.error('Error creating record in Neon:', err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: err.message, records: [] });
     }
   });
 
+  // Fast aggregation endpoint
+  app.get('/api/records/stats', async (req, res) => {
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const statsRes = await pool.query(`
+            SELECT 
+              COUNT(*) as total_records,
+              COALESCE(SUM(montant), 0) as total_revenue,
+              COUNT(*) FILTER (WHERE record_type = 'CG') as cg_count,
+              COUNT(*) FILTER (WHERE record_type = 'PC') as pc_count
+            FROM records;
+          `);
+          const row = statsRes.rows[0];
+          return res.json({
+            totalRecords: parseInt(row.total_records || '0', 10),
+            totalRevenue: parseFloat(row.total_revenue || '0'),
+            cgCount: parseInt(row.cg_count || '0', 10),
+            pcCount: parseInt(row.pc_count || '0', 10),
+          });
+        } catch (err: any) {
+          console.warn('Neon stats failed, calculating from local store:', err.message);
+        }
+      }
+    }
+
+    const records = getLocalRecords();
+    const totalRecords = records.length;
+    const totalRevenue = records.reduce((sum, r) => sum + (Number(r.montant) || 0), 0);
+    const cgCount = records.filter(r => r.recordType === 'CG').length;
+    const pcCount = records.filter(r => r.recordType === 'PC').length;
+
+    return res.json({ totalRecords, totalRevenue, cgCount, pcCount });
+  });
+
+  // Create record
+  app.post('/api/records', async (req, res) => {
+    const record: RegistryRecord = {
+      ...req.body,
+      id: req.body.id || `rec-${(req.body.recordType || 'cg').toLowerCase()}-${Date.now()}`,
+      createdAt: req.body.createdAt || new Date().toISOString()
+    };
+
+    // Always update local store
+    const localRecords = getLocalRecords();
+    const existingIndex = localRecords.findIndex(r => r.id === record.id);
+    if (existingIndex >= 0) {
+      localRecords[existingIndex] = record;
+    } else {
+      localRecords.unshift(record);
+    }
+    saveLocalRecords(localRecords);
+
+    // If Postgres is connected, save to Neon
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const query = `
+            INSERT INTO records (
+              id, record_type, num_serial, name, montant, date, created_at, notes,
+              cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
+              pc_type, categories, num_quittance
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            ON CONFLICT (id) DO UPDATE SET
+              montant = EXCLUDED.montant,
+              date = EXCLUDED.date,
+              name = EXCLUDED.name,
+              notes = EXCLUDED.notes
+            RETURNING *;
+          `;
+
+          const anyRec = record as any;
+          const values = [
+            record.id,
+            record.recordType,
+            record.numSerial,
+            record.name,
+            record.montant,
+            record.date,
+            record.createdAt,
+            record.notes || null,
+            anyRec.cv || null,
+            record.type && record.recordType === 'CG' ? record.type : null,
+            anyRec.numCars || null,
+            anyRec.montantCV || 0,
+            anyRec.montantDossier || 0,
+            anyRec.numQuittance1 || null,
+            anyRec.numQuittance2 || null,
+            record.type && record.recordType === 'PC' ? record.type : null,
+            anyRec.categories || [],
+            anyRec.numQuittance || null,
+          ];
+
+          const result = await pool.query(query, values);
+          return res.status(201).json(mapRowToRecord(result.rows[0]));
+        } catch (err: any) {
+          console.warn('Neon insert warning, persisted locally:', err.message);
+        }
+      }
+    }
+
+    return res.status(201).json(record);
+  });
+
+  // Update record
   app.put('/api/records/:id', async (req, res) => {
     const { id } = req.params;
-    const record = req.body;
-    const pool = getPool();
+    const updates = req.body;
 
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
+    const localRecords = getLocalRecords();
+    const idx = localRecords.findIndex(r => r.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Dossier introuvable' });
     }
 
-    try {
-      const query = `
-        UPDATE records SET
-          record_type = $2,
-          num_serial = $3,
-          name = $4,
-          montant = $5,
-          date = $6,
-          notes = $7,
-          cv = $8,
-          cg_type = $9,
-          num_cars = $10,
-          montant_cv = $11,
-          montant_dossier = $12,
-          num_quittance1 = $13,
-          num_quittance2 = $14,
-          pc_type = $15,
-          categories = $16,
-          num_quittance = $17
-        WHERE id = $1
-        RETURNING *;
-      `;
+    const updatedRecord: RegistryRecord = { ...localRecords[idx], ...updates, id };
+    localRecords[idx] = updatedRecord;
+    saveLocalRecords(localRecords);
 
-      const values = [
-        id,
-        record.recordType,
-        record.numSerial,
-        record.name,
-        record.montant,
-        record.date,
-        record.notes || null,
-        record.cv || null,
-        record.type && record.recordType === 'CG' ? record.type : null,
-        record.numCars || null,
-        record.montantCV || 0,
-        record.montantDossier || 0,
-        record.numQuittance1 || null,
-        record.numQuittance2 || null,
-        record.type && record.recordType === 'PC' ? record.type : null,
-        record.categories || [],
-        record.numQuittance || null,
-      ];
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const query = `
+            UPDATE records SET
+              record_type = $2,
+              num_serial = $3,
+              name = $4,
+              montant = $5,
+              date = $6,
+              notes = $7,
+              cv = $8,
+              cg_type = $9,
+              num_cars = $10,
+              montant_cv = $11,
+              montant_dossier = $12,
+              num_quittance1 = $13,
+              num_quittance2 = $14,
+              pc_type = $15,
+              categories = $16,
+              num_quittance = $17
+            WHERE id = $1
+            RETURNING *;
+          `;
 
-      const result = await pool.query(query, values);
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Record introuvable' });
+          const anyUpdated = updatedRecord as any;
+          const values = [
+            id,
+            updatedRecord.recordType,
+            updatedRecord.numSerial,
+            updatedRecord.name,
+            updatedRecord.montant,
+            updatedRecord.date,
+            updatedRecord.notes || null,
+            anyUpdated.cv || null,
+            updatedRecord.type && updatedRecord.recordType === 'CG' ? updatedRecord.type : null,
+            anyUpdated.numCars || null,
+            anyUpdated.montantCV || 0,
+            anyUpdated.montantDossier || 0,
+            anyUpdated.numQuittance1 || null,
+            anyUpdated.numQuittance2 || null,
+            updatedRecord.type && updatedRecord.recordType === 'PC' ? updatedRecord.type : null,
+            anyUpdated.categories || [],
+            anyUpdated.numQuittance || null,
+          ];
+
+          const result = await pool.query(query, values);
+          if (result.rows.length > 0) {
+            return res.json(mapRowToRecord(result.rows[0]));
+          }
+        } catch (err: any) {
+          console.warn('Neon update warning, updated locally:', err.message);
+        }
       }
-      return res.json(mapRowToRecord(result.rows[0]));
-    } catch (err: any) {
-      console.error('Error updating record in Neon:', err.message);
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.json(updatedRecord);
   });
 
+  // Delete record
   app.delete('/api/records/:id', async (req, res) => {
     const { id } = req.params;
-    const pool = getPool();
 
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
-    }
+    const localRecords = getLocalRecords();
+    const filtered = localRecords.filter(r => r.id !== id);
+    saveLocalRecords(filtered);
 
-    try {
-      const result = await pool.query('DELETE FROM records WHERE id = $1 RETURNING id', [id]);
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Record introuvable' });
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          await pool.query('DELETE FROM records WHERE id = $1', [id]);
+        } catch (err: any) {
+          console.warn('Neon delete warning, deleted locally:', err.message);
+        }
       }
-      return res.json({ success: true, deletedId: id });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.json({ success: true, deletedId: id });
   });
 
-  // Bulk Seed initial records into Neon DB
-  app.post('/api/records/seed', async (req, res) => {
-    const pool = getPool();
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
+  // High-performance batch insertion
+  app.post('/api/records/batch', async (req, res) => {
+    const { records } = req.body;
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: 'Tableau de dossiers records requis' });
     }
 
-    try {
-      const recordsToInsert = req.body?.records || INITIAL_REGISTRY_DATA;
-      let insertedCount = 0;
+    // Save to local store
+    const localRecords = getLocalRecords();
+    const recordsMap = new Map<string, RegistryRecord>(localRecords.map(r => [r.id, r]));
+    for (const r of records) {
+      recordsMap.set(r.id, r);
+    }
+    saveLocalRecords(Array.from(recordsMap.values()));
 
-      for (const record of recordsToInsert) {
-        const query = `
-          INSERT INTO records (
-            id, record_type, num_serial, name, montant, date, created_at, notes,
-            cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
-            pc_type, categories, num_quittance
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-          ON CONFLICT (id) DO UPDATE SET
-            montant = EXCLUDED.montant,
-            date = EXCLUDED.date,
-            name = EXCLUDED.name;
-        `;
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const client = await pool.connect();
+          try {
+            await client.query('BEGIN');
+            let insertedCount = 0;
 
-        const values = [
-          record.id,
-          record.recordType,
-          record.numSerial,
-          record.name,
-          record.montant,
-          record.date,
-          record.createdAt || new Date().toISOString(),
-          record.notes || null,
-          record.cv || null,
-          record.type && record.recordType === 'CG' ? record.type : null,
-          record.numCars || null,
-          record.montantCV || 0,
-          record.montantDossier || 0,
-          record.numQuittance1 || null,
-          record.numQuittance2 || null,
-          record.type && record.recordType === 'PC' ? record.type : null,
-          record.categories || [],
-          record.numQuittance || null,
-        ];
+            for (const record of records) {
+              const query = `
+                INSERT INTO records (
+                  id, record_type, num_serial, name, montant, date, created_at, notes,
+                  cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
+                  pc_type, categories, num_quittance
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                ON CONFLICT (id) DO UPDATE SET
+                  montant = EXCLUDED.montant,
+                  date = EXCLUDED.date,
+                  name = EXCLUDED.name,
+                  notes = EXCLUDED.notes;
+              `;
 
-        await pool.query(query, values);
-        insertedCount++;
+              const values = [
+                record.id,
+                record.recordType,
+                record.numSerial,
+                record.name,
+                record.montant,
+                record.date,
+                record.createdAt || new Date().toISOString(),
+                record.notes || null,
+                record.cv || null,
+                record.type && record.recordType === 'CG' ? record.type : null,
+                record.numCars || null,
+                record.montantCV || 0,
+                record.montantDossier || 0,
+                record.numQuittance1 || null,
+                record.numQuittance2 || null,
+                record.type && record.recordType === 'PC' ? record.type : null,
+                record.categories || [],
+                record.numQuittance || null,
+              ];
+
+              await client.query(query, values);
+              insertedCount++;
+            }
+
+            await client.query('COMMIT');
+            return res.json({ 
+              success: true, 
+              count: insertedCount, 
+              message: `${insertedCount} dossiers enregistrés avec succès dans PostgreSQL Neon !` 
+            });
+          } catch (err: any) {
+            await client.query('ROLLBACK');
+            console.warn('Neon batch failed, persisted locally:', err.message);
+          } finally {
+            client.release();
+          }
+        } catch (e: any) {
+          console.warn('Neon batch connection failed:', e.message);
+        }
       }
-
-      return res.json({ success: true, count: insertedCount, message: `${insertedCount} dossiers importés dans Neon PostgreSQL !` });
-    } catch (err: any) {
-      console.error('Seed error:', err.message);
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.json({ 
+      success: true, 
+      count: records.length, 
+      message: `${records.length} dossiers enregistrés avec succès dans le registre local !` 
+    });
   });
 
   // ----------------------------------------------------
   // API: Users Management & RBAC
   // ----------------------------------------------------
   app.get('/api/users', async (req, res) => {
-    const pool = getPool();
-    if (pool) {
-      try {
-        const result = await pool.query('SELECT * FROM users ORDER BY created_at ASC');
-        const users = result.rows.map(mapRowToUser);
-        return res.json({ source: 'neon', users });
-      } catch (err: any) {
-        console.error('Error fetching users from Neon:', err.message);
-        return res.status(500).json({ error: err.message });
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const result = await pool.query('SELECT * FROM users ORDER BY created_at ASC');
+          const users = result.rows.map(mapRowToUser);
+          return res.json({ source: 'neon', users });
+        } catch (err: any) {
+          console.warn('Neon get users failed, using local store:', err.message);
+        }
       }
     }
-    return res.json({ source: 'local', users: INITIAL_USERS });
+
+    const localUsers = getLocalUsers();
+    return res.json({ source: 'local_fallback', users: localUsers });
   });
 
   app.post('/api/users', async (req, res) => {
-    const user = req.body;
-    const pool = getPool();
+    const userBody = req.body;
+    const cleanEmail = (userBody.email || '').toLowerCase().trim();
 
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
+    const localUsers = getLocalUsers();
+    if (localUsers.some(u => u.email.toLowerCase() === cleanEmail)) {
+      return res.status(409).json({ error: 'Un compte avec cette adresse email existe déjà.' });
     }
 
-    try {
-      const query = `
-        INSERT INTO users (
-          id, name, email, password, role, status, department, phone, created_at, approved_at, approved_by
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING *;
-      `;
-      const values = [
-        user.id || `usr-${Date.now()}`,
-        user.name,
-        user.email.toLowerCase().trim(),
-        user.password,
-        user.role || 'AGENT',
-        user.status || 'PENDING',
-        user.department || null,
-        user.phone || null,
-        user.createdAt || new Date().toISOString(),
-        user.approvedAt || (user.status === 'APPROVED' ? new Date().toISOString() : null),
-        user.approvedBy || null,
-      ];
+    const newUser: AppUser = {
+      id: userBody.id || `usr-${Date.now()}`,
+      name: userBody.name,
+      email: cleanEmail,
+      password: userBody.password,
+      role: userBody.role || 'AGENT',
+      status: userBody.status || 'PENDING',
+      department: userBody.department || undefined,
+      phone: userBody.phone || undefined,
+      createdAt: userBody.createdAt || new Date().toISOString(),
+      approvedAt: userBody.status === 'APPROVED' ? new Date().toISOString() : undefined,
+      approvedBy: userBody.approvedBy || undefined,
+    };
 
-      const result = await pool.query(query, values);
-      return res.status(201).json(mapRowToUser(result.rows[0]));
-    } catch (err: any) {
-      if (err.code === '23505') {
-        return res.status(409).json({ error: 'Un compte avec cette adresse email existe déjà.' });
+    localUsers.push(newUser);
+    saveLocalUsers(localUsers);
+
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const query = `
+            INSERT INTO users (
+              id, name, email, password, role, status, department, phone, created_at, approved_at, approved_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *;
+          `;
+          const values = [
+            newUser.id,
+            newUser.name,
+            newUser.email,
+            newUser.password,
+            newUser.role,
+            newUser.status,
+            newUser.department || null,
+            newUser.phone || null,
+            newUser.createdAt,
+            newUser.approvedAt || null,
+            newUser.approvedBy || null,
+          ];
+
+          const result = await pool.query(query, values);
+          return res.status(201).json(mapRowToUser(result.rows[0]));
+        } catch (err: any) {
+          console.warn('Neon user insert warning, persisted locally:', err.message);
+        }
       }
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.status(201).json(newUser);
   });
 
   app.patch('/api/users/:id', async (req, res) => {
     const { id } = req.params;
     const { role, status, approvedBy, department, phone } = req.body;
-    const pool = getPool();
 
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
+    const localUsers = getLocalUsers();
+    const idx = localUsers.findIndex(u => u.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
 
-    try {
-      const approvedAt = status === 'APPROVED' ? new Date().toISOString() : null;
+    const updatedUser: AppUser = {
+      ...localUsers[idx],
+      ...(role ? { role } : {}),
+      ...(status ? { status } : {}),
+      ...(approvedBy ? { approvedBy } : {}),
+      ...(department !== undefined ? { department } : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(status === 'APPROVED' ? { approvedAt: new Date().toISOString() } : {}),
+    };
+    localUsers[idx] = updatedUser;
+    saveLocalUsers(localUsers);
 
-      const query = `
-        UPDATE users SET
-          role = COALESCE($2, role),
-          status = COALESCE($3, status),
-          approved_at = CASE WHEN $3 = 'APPROVED' THEN NOW() ELSE approved_at END,
-          approved_by = COALESCE($4, approved_by),
-          department = COALESCE($5, department),
-          phone = COALESCE($6, phone)
-        WHERE id = $1
-        RETURNING *;
-      `;
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const query = `
+            UPDATE users SET
+              role = COALESCE($2, role),
+              status = COALESCE($3, status),
+              approved_at = CASE WHEN $3 = 'APPROVED' THEN NOW() ELSE approved_at END,
+              approved_by = COALESCE($4, approved_by),
+              department = COALESCE($5, department),
+              phone = COALESCE($6, phone)
+            WHERE id = $1
+            RETURNING *;
+          `;
 
-      const result = await pool.query(query, [
-        id,
-        role || null,
-        status || null,
-        approvedBy || null,
-        department || null,
-        phone || null,
-      ]);
+          const result = await pool.query(query, [
+            id,
+            role || null,
+            status || null,
+            approvedBy || null,
+            department || null,
+            phone || null,
+          ]);
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+          if (result.rows.length > 0) {
+            return res.json(mapRowToUser(result.rows[0]));
+          }
+        } catch (err: any) {
+          console.warn('Neon user patch warning, updated locally:', err.message);
+        }
       }
-
-      return res.json(mapRowToUser(result.rows[0]));
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.json(updatedUser);
   });
 
   app.delete('/api/users/:id', async (req, res) => {
     const { id } = req.params;
-    const pool = getPool();
 
-    if (!pool) {
-      return res.status(400).json({ error: 'DATABASE_URL non configurée' });
-    }
+    const localUsers = getLocalUsers();
+    const filtered = localUsers.filter(u => u.id !== id);
+    saveLocalUsers(filtered);
 
-    try {
-      const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          await pool.query('DELETE FROM users WHERE id = $1', [id]);
+        } catch (err: any) {
+          console.warn('Neon user delete warning, deleted locally:', err.message);
+        }
       }
-      return res.json({ success: true, deletedId: id });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
     }
+
+    return res.json({ success: true, deletedId: id });
   });
 
   // ----------------------------------------------------
@@ -423,50 +711,50 @@ async function startServer() {
     const cleanEmail = (email || '').toLowerCase().trim();
     const cleanPassword = (password || '').trim();
 
-    const pool = getPool();
-    if (pool) {
-      try {
-        const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [cleanEmail]);
-        if (result.rows.length === 0) {
-          return res.status(401).json({ error: 'Adresse e-mail ou mot de passe incorrect.' });
+    let targetUser: AppUser | null = null;
+
+    if (isPostgresConnected()) {
+      const pool = getPool();
+      if (pool) {
+        try {
+          const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [cleanEmail]);
+          if (result.rows.length > 0) {
+            targetUser = mapRowToUser(result.rows[0]);
+          }
+        } catch (err: any) {
+          console.warn('Neon auth query failed, checking local users:', err.message);
         }
-
-        const userRow = result.rows[0];
-        if (userRow.password !== cleanPassword) {
-          return res.status(401).json({ error: 'Adresse e-mail ou mot de passe incorrect.' });
-        }
-
-        const user = mapRowToUser(userRow);
-
-        if (user.status === 'PENDING') {
-          return res.status(403).json({
-            error: 'Votre compte est en attente d\'approbation par l\'administrateur (Mahdi). Vous ne pouvez pas encore vous connecter.',
-            status: 'PENDING'
-          });
-        }
-
-        if (user.status === 'REJECTED') {
-          return res.status(403).json({
-            error: 'L\'accès à ce compte a été suspendu ou refusé par l\'administration.',
-            status: 'REJECTED'
-          });
-        }
-
-        return res.json({ success: true, user });
-      } catch (err: any) {
-        console.error('Login query error in Neon:', err.message);
-        return res.status(500).json({ error: err.message });
       }
     }
 
-    // If Neon not configured, test against in-memory/seed
-    const localUser = INITIAL_USERS.find(
-      (u) => u.email.toLowerCase() === cleanEmail && u.password === cleanPassword
-    );
-    if (!localUser) {
-      return res.status(401).json({ error: 'Identifiants invalides.' });
+    if (!targetUser) {
+      const localUsers = getLocalUsers();
+      targetUser = localUsers.find(u => u.email.toLowerCase() === cleanEmail) || null;
     }
-    return res.json({ success: true, user: localUser, note: 'Mode local' });
+
+    if (!targetUser) {
+      return res.status(401).json({ error: 'Adresse e-mail ou mot de passe incorrect.' });
+    }
+
+    if (targetUser.password !== cleanPassword) {
+      return res.status(401).json({ error: 'Adresse e-mail ou mot de passe incorrect.' });
+    }
+
+    if (targetUser.status === 'PENDING') {
+      return res.status(403).json({
+        error: 'Votre compte est en attente d\'approbation par l\'administrateur (Mahdi). Vous ne pouvez pas encore vous connecter.',
+        status: 'PENDING'
+      });
+    }
+
+    if (targetUser.status === 'REJECTED') {
+      return res.status(403).json({
+        error: 'L\'accès à ce compte a été suspendu ou refusé par l\'administration.',
+        status: 'REJECTED'
+      });
+    }
+
+    return res.json({ success: true, user: targetUser });
   });
 
   // ----------------------------------------------------
@@ -511,3 +799,4 @@ async function startServer() {
 }
 
 startServer();
+

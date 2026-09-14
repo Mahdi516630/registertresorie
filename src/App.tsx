@@ -34,9 +34,6 @@ import {
   UserStatus
 } from './types';
 import { 
-  INITIAL_REGISTRY_DATA 
-} from './data/initialData';
-import { 
   INITIAL_USERS,
   ADMIN_EMAIL
 } from './data/initialUsers';
@@ -54,75 +51,27 @@ import {
   Car, 
   CreditCard,
   Database,
-  Server
+  Server,
+  AlertTriangle,
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 
-const STORAGE_KEY = 'cg_pc_registry_data_v1';
 const CURRENCY_KEY = 'cg_pc_registry_currency_v1';
-const USERS_STORAGE_KEY = 'cg_pc_registry_users_v2';
 const AUTH_USER_KEY = 'cg_pc_registry_auth_user_v2';
 
 export default function App() {
-  // Load data from localStorage or default to empty list (database authoritative)
-  const [records, setRecords] = useState<RegistryRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          // Purge any legacy sample/mock records that are not in the database
-          const clean = parsed.filter(
-            (r: RegistryRecord) =>
-              !r.id?.startsWith('cg-2026-') &&
-              !r.id?.startsWith('pc-2026-') &&
-              !r.id?.startsWith('cg-2025-') &&
-              !r.id?.startsWith('pc-2025-')
-          );
-          return clean;
-        }
-      }
-    } catch (e) {
-      console.error('Error loading saved records:', e);
-    }
-    return [];
-  });
+  // Authoritative data loaded strictly from PostgreSQL Neon
+  const [records, setRecords] = useState<RegistryRecord[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
 
-  // User database with Mahdi as super-admin
-  const [users, setUsers] = useState<AppUser[]>(() => {
-    try {
-      const saved = localStorage.getItem(USERS_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Remove unlisted mock users
-          const clean = parsed.filter(
-            (u: AppUser) => !['usr-agent-01', 'usr-pend-01', 'usr-pend-02'].includes(u.id)
-          );
-          // Ensure Mahdi admin is always present and active
-          const hasMahdi = clean.some(
-            (u: AppUser) => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-          );
-          if (!hasMahdi) {
-            return [INITIAL_USERS[0], ...clean];
-          }
-          return clean.length > 0 ? clean : INITIAL_USERS;
-        }
-      }
-    } catch (e) {
-      console.error('Error loading saved users:', e);
-    }
-    return INITIAL_USERS;
-  });
-
-  // Current logged in user
+  // Current logged in user session
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const saved = localStorage.getItem(AUTH_USER_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.id) {
-          return parsed;
-        }
+        if (parsed && parsed.id) return parsed;
       }
     } catch (e) {
       console.error('Error loading auth user:', e);
@@ -161,7 +110,9 @@ export default function App() {
 
   // Neon PostgreSQL Database modal & connection state
   const [isNeonModalOpen, setIsNeonModalOpen] = useState(false);
+  const [isCheckingDb, setIsCheckingDb] = useState(true);
   const [isDbConnected, setIsDbConnected] = useState(false);
+  const [reconnectCountdown, setReconnectCountdown] = useState(5);
   const [dbInfo, setDbInfo] = useState<{ recordCount: number; userCount: number; message: string }>({
     recordCount: 0,
     userCount: 0,
@@ -171,59 +122,63 @@ export default function App() {
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Check Database connection on mount
-  const refreshDbStatus = async () => {
+  // Check Database connection
+  const refreshDbStatus = async (silent = false): Promise<boolean> => {
+    if (!silent) setIsCheckingDb(true);
     try {
       const status = await api.getStatus();
-      if (status.connected) {
-        setIsDbConnected(true);
-        setDbInfo({
-          recordCount: status.recordCount,
-          userCount: status.userCount,
-          message: status.message,
-        });
+      const connected = status.connected === true;
+      setIsDbConnected(connected);
+      setDbInfo({
+        recordCount: status.recordCount || 0,
+        userCount: status.userCount || 0,
+        message: status.message || '',
+      });
 
-        // Load real records from PostgreSQL (single source of truth)
-        const remoteRecordsRes = await api.getRecords().catch(() => null);
-        if (remoteRecordsRes && Array.isArray(remoteRecordsRes.records)) {
-          setRecords(remoteRecordsRes.records);
-        }
+      // Load records & users (the server serves seamlessly from Neon or Local Fallback)
+      const [remoteRecordsRes, remoteUsersRes] = await Promise.all([
+        api.getRecords().catch((err) => {
+          console.warn('Could not fetch records:', err.message);
+          return null;
+        }),
+        api.getUsers().catch((err) => {
+          console.warn('Could not fetch users:', err.message);
+          return null;
+        }),
+      ]);
 
-        // Load real users from PostgreSQL
-        const remoteUsersRes = await api.getUsers().catch(() => null);
-        if (remoteUsersRes && Array.isArray(remoteUsersRes.users) && remoteUsersRes.users.length > 0) {
-          setUsers(remoteUsersRes.users);
-        }
-      } else {
-        setIsDbConnected(false);
+      if (remoteRecordsRes && Array.isArray(remoteRecordsRes.records)) {
+        setRecords(remoteRecordsRes.records);
       }
-    } catch (e) {
+      if (remoteUsersRes && Array.isArray(remoteUsersRes.users) && remoteUsersRes.users.length > 0) {
+        setUsers(remoteUsersRes.users);
+      }
+      setIsCheckingDb(false);
+      return connected;
+    } catch (e: any) {
       console.error('Error fetching DB status:', e);
       setIsDbConnected(false);
+      setDbInfo((prev) => ({
+        ...prev,
+        message: e.message || 'Impossible de joindre le serveur API',
+      }));
+      setIsCheckingDb(false);
+      return false;
     }
   };
 
+  // Initial connection check on mount
   useEffect(() => {
     refreshDbStatus();
   }, []);
 
-  // Synchronize records with localStorage
+  // Periodic status poll every 30 seconds
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    } catch (e) {
-      console.error('Error saving records:', e);
-    }
-  }, [records]);
-
-  // Synchronize users with localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-    } catch (e) {
-      console.error('Error saving users:', e);
-    }
-  }, [users]);
+    const interval = setInterval(() => {
+      refreshDbStatus(true);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Synchronize current user status
   useEffect(() => {
@@ -286,8 +241,8 @@ export default function App() {
     showToast('Déconnexion effectuée avec succès.');
   };
 
-  // Registration handler (Pending admin approval)
-  const handleRegister = (newUser: AppUser) => {
+  // Registration handler (Submitted to PostgreSQL Neon, pending admin approval)
+  const handleRegister = async (newUser: AppUser) => {
     const emailClean = newUser.email.toLowerCase();
     if (users.some((u) => u.email.toLowerCase() === emailClean)) {
       return { 
@@ -296,77 +251,75 @@ export default function App() {
       };
     }
 
-    setUsers((prev) => [...prev, newUser]);
-
-    // Persist to Neon Postgres if connected
-    api.createUser(newUser).catch((err) => {
-      console.warn('Neon createUser fallback to local:', err.message);
-    });
-
-    return {
-      success: true,
-      message: "Demande enregistrée. En attente de validation par l'administrateur (Mahdi)."
-    };
-  };
-
-  // User Management Actions (for Admin Mahdi)
-  const handleUpdateUserStatus = (userId: string, newStatus: UserStatus) => {
-    const targetUser = users.find((u) => u.id === userId);
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          return {
-            ...u,
-            status: newStatus,
-            approvedAt: newStatus === 'APPROVED' ? new Date().toISOString() : u.approvedAt,
-            approvedBy: newStatus === 'APPROVED' ? (currentUser?.email || ADMIN_EMAIL) : u.approvedBy,
-          };
-        }
-        return u;
-      })
-    );
-
-    // Persist to Neon Postgres
-    api.updateUser(userId, {
-      status: newStatus,
-      approvedBy: currentUser?.email || ADMIN_EMAIL,
-    }).catch((err) => {
-      console.warn('Neon updateUser fallback:', err.message);
-    });
-
-    if (newStatus === 'APPROVED') {
-      showToast(`Accès autorisé pour ${targetUser?.name || 'l\'agent'}. Il peut désormais se connecter !`);
-    } else if (newStatus === 'REJECTED') {
-      showToast(`Accès bloqué/refusé pour ${targetUser?.name || 'l\'agent'}.`);
+    try {
+      const created = await api.createUser(newUser);
+      setUsers((prev) => [...prev, created]);
+      return {
+        success: true,
+        message: "Demande enregistrée dans la base de données. En attente de validation par l'administrateur (Mahdi)."
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Erreur d'enregistrement : ${err.message}`
+      };
     }
   };
 
-  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-    );
-
-    api.updateUser(userId, { role: newRole }).catch((err) => {
-      console.warn('Neon updateUser role fallback:', err.message);
-    });
-
-    showToast("Rôle de l'utilisateur mis à jour.");
+  // User Management Actions (for Admin Mahdi)
+  const handleUpdateUserStatus = async (userId: string, newStatus: UserStatus) => {
+    try {
+      const updated = await api.updateUser(userId, {
+        status: newStatus,
+        approvedBy: currentUser?.email || ADMIN_EMAIL,
+      });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, ...updated } : u))
+      );
+      if (newStatus === 'APPROVED') {
+        showToast("Accès autorisé avec succès dans PostgreSQL Neon ! L'agent peut se connecter.");
+      } else if (newStatus === 'REJECTED') {
+        showToast("Accès révoqué dans PostgreSQL Neon.");
+      }
+    } catch (err: any) {
+      showToast(`Erreur de mise à jour du statut : ${err.message}`);
+      refreshDbStatus(true);
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
-    api.deleteUser(userId).catch((err) => {
-      console.warn('Neon deleteUser fallback:', err.message);
-    });
-    showToast("Compte utilisateur supprimé.");
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+    try {
+      const updated = await api.updateUser(userId, { role: newRole });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, ...updated } : u))
+      );
+      showToast("Rôle utilisateur mis à jour dans PostgreSQL Neon.");
+    } catch (err: any) {
+      showToast(`Erreur de modification du rôle : ${err.message}`);
+      refreshDbStatus(true);
+    }
   };
 
-  const handleAddUser = (newUser: AppUser) => {
-    setUsers((prev) => [newUser, ...prev]);
-    api.createUser(newUser).catch((err) => {
-      console.warn('Neon addUser fallback:', err.message);
-    });
-    showToast(`Utilisateur ${newUser.name} créé avec succès.`);
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      await api.deleteUser(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      showToast("Compte utilisateur supprimé définitivement de PostgreSQL Neon.");
+    } catch (err: any) {
+      showToast(`Erreur de suppression de l'utilisateur : ${err.message}`);
+      refreshDbStatus(true);
+    }
+  };
+
+  const handleAddUser = async (newUser: AppUser) => {
+    try {
+      const created = await api.createUser(newUser);
+      setUsers((prev) => [created, ...prev]);
+      showToast(`Utilisateur ${newUser.name} créé avec succès dans PostgreSQL Neon.`);
+    } catch (err: any) {
+      showToast(`Erreur de création d'utilisateur : ${err.message}`);
+      refreshDbStatus(true);
+    }
   };
 
   // Open modal to add a new record
@@ -384,26 +337,26 @@ export default function App() {
   };
 
   // Save record (Create or Update)
-  const handleSaveRecord = (savedRecord: RegistryRecord) => {
-    if (editingRecord) {
-      // Update
-      setRecords((prev) =>
-        prev.map((r) => (r.id === savedRecord.id ? savedRecord : r))
-      );
-      api.updateRecord(savedRecord.id, savedRecord).catch((err) => {
-        console.warn('Neon updateRecord fallback:', err.message);
-      });
-      showToast(`Dossier ${savedRecord.numSerial} mis à jour avec succès.`);
-    } else {
-      // Create new
-      setRecords((prev) => [savedRecord, ...prev]);
-      api.createRecord(savedRecord).catch((err) => {
-        console.warn('Neon createRecord fallback:', err.message);
-      });
-      showToast(`Nouveau dossier ${savedRecord.numSerial} enregistré avec succès.`);
+  const handleSaveRecord = async (savedRecord: RegistryRecord) => {
+    try {
+      if (editingRecord) {
+        const updated = await api.updateRecord(savedRecord.id, savedRecord);
+        setRecords((prev) =>
+          prev.map((r) => (r.id === updated.id ? updated : r))
+        );
+        showToast(`Dossier ${updated.numSerial} mis à jour avec succès dans PostgreSQL Neon.`);
+      } else {
+        const created = await api.createRecord(savedRecord);
+        setRecords((prev) => [created, ...prev]);
+        setDbInfo((prev) => ({ ...prev, recordCount: prev.recordCount + 1 }));
+        showToast(`Nouveau dossier ${created.numSerial} enregistré avec succès dans PostgreSQL Neon.`);
+      }
+      setIsRecordModalOpen(false);
+      setEditingRecord(null);
+    } catch (err: any) {
+      showToast(`Erreur d'enregistrement : ${err.message}`);
+      refreshDbStatus(true);
     }
-    setIsRecordModalOpen(false);
-    setEditingRecord(null);
   };
 
   // Trigger delete confirmation modal
@@ -413,15 +366,19 @@ export default function App() {
   };
 
   // Confirm delete
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (recordToDelete) {
-      setRecords((prev) => prev.filter((r) => r.id !== recordToDelete.id));
-      api.deleteRecord(recordToDelete.id).catch((err) => {
-        console.warn('Neon deleteRecord fallback:', err.message);
-      });
-      showToast(`Dossier ${recordToDelete.numSerial} supprimé du registre.`);
-      setIsDeleteModalOpen(false);
-      setRecordToDelete(null);
+      try {
+        await api.deleteRecord(recordToDelete.id);
+        setRecords((prev) => prev.filter((r) => r.id !== recordToDelete.id));
+        setDbInfo((prev) => ({ ...prev, recordCount: Math.max(0, prev.recordCount - 1) }));
+        showToast(`Dossier ${recordToDelete.numSerial} supprimé du registre.`);
+        setIsDeleteModalOpen(false);
+        setRecordToDelete(null);
+      } catch (err: any) {
+        showToast(`Erreur de suppression : ${err.message}`);
+        refreshDbStatus(true);
+      }
     }
   };
 
@@ -438,22 +395,10 @@ export default function App() {
     showToast(`Export CSV téléchargé (${records.length} dossiers).`);
   };
 
-  // Purge any local/unindexed records not found in database and re-sync
+  // Purge local cache and reload from Neon PostgreSQL
   const handleClearUnindexedData = async () => {
-    if (window.confirm('Voulez-vous supprimer toutes les données locales non répertoriées dans la base de données et re-synchroniser ?')) {
-      try {
-        const res = await api.getRecords();
-        if (res && Array.isArray(res.records)) {
-          setRecords(res.records);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(res.records));
-          showToast(`Synchronisation réussie : ${res.records.length} dossier(s) répertorié(s) dans la base de données.`);
-        }
-      } catch {
-        setRecords([]);
-        localStorage.removeItem(STORAGE_KEY);
-        showToast('Données non répertoriées supprimées avec succès.');
-      }
-    }
+    await refreshDbStatus();
+    showToast('Données re-synchronisées depuis PostgreSQL Neon.');
   };
 
   // Calculated overall totals
@@ -463,7 +408,29 @@ export default function App() {
   const pcCount = records.filter((r) => r.recordType === 'PC').length;
   const pendingUsersCount = users.filter((u) => u.status === 'PENDING').length;
 
-  // ================= IF NOT LOGGED IN -> SHOW LOGIN / REGISTER PAGE =================
+  // ================= 1. INITIAL CHECKING STATE =================
+  if (isCheckingDb && records.length === 0 && users.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-xl shadow-blue-500/20 mb-6 border border-blue-400/30 animate-pulse">
+          <ShieldCheck className="w-9 h-9 text-white" />
+        </div>
+        <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+          Trésorerie De La Préfecture De Djibouti
+        </h2>
+        <p className="text-xs uppercase tracking-widest text-blue-300 font-bold mt-1">
+          Registre Officiel CG & PC • Capacité 50 000 Dossiers
+        </p>
+
+        <div className="mt-8 flex items-center space-x-3 bg-slate-800/90 px-5 py-3 rounded-xl border border-slate-700 text-slate-300 text-sm shadow-lg">
+          <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+          <span>Chargement du Registre et vérification de la base...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= 2. IF NOT LOGGED IN -> SHOW LOGIN / REGISTER PAGE =================
   if (!currentUser) {
     return (
       <>
@@ -494,7 +461,7 @@ export default function App() {
     );
   }
 
-  // ================= LOGGED IN USER INTERFACE =================
+  // ================= 4. LOGGED IN USER INTERFACE (LIVE POSTGRESQL CONNECTED) =================
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col antialiased selection:bg-blue-600 selection:text-white">
       {/* Toast Notification Alert */}
@@ -506,38 +473,44 @@ export default function App() {
       )}
 
       {/* Database Connection Notice Banner */}
-      <div className={`border-b text-xs py-2 px-4 flex items-center justify-between flex-wrap gap-2 ${
-        isDbConnected 
-          ? 'bg-emerald-600 text-white border-emerald-700' 
-          : 'bg-slate-900 text-slate-300 border-slate-800'
-      }`}>
-        <div className="flex items-center space-x-2">
-          <Database className={`w-4 h-4 ${isDbConnected ? 'text-emerald-200' : 'text-amber-400'}`} />
-          <span>
-            {isDbConnected ? (
+      {isDbConnected ? (
+        <div className="bg-emerald-600 text-white border-b border-emerald-700 text-xs py-2 px-4 flex items-center justify-between flex-wrap gap-2 shadow-xs">
+          <div className="flex items-center space-x-2">
+            <Database className="w-4 h-4 text-emerald-200" />
+            <span>
               <strong>
-                PostgreSQL Neon Connecté : Mode Données Réelles Actif ({dbInfo.recordCount} dossiers en base réelle)
+                PostgreSQL Neon Connecté : Mode Données Réelles Actif ({dbInfo.recordCount.toLocaleString('fr-FR')} dossiers en base) • Capacité 50 000+ dossiers indexés
               </strong>
-            ) : (
-              <span>
-                <strong>PostgreSQL Neon :</strong> Obtenez le script SQL <code className="text-amber-300 bg-slate-800 px-1 py-0.5 rounded">CREATE TABLE</code> pour Neon et connectez votre base réelle pour quitter le mode simulation.
-              </span>
-            )}
-          </span>
-        </div>
+            </span>
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setIsNeonModalOpen(true)}
-          className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md font-bold text-[11px] cursor-pointer shadow-xs transition-colors ${
-            isDbConnected 
-              ? 'bg-white text-emerald-800 hover:bg-emerald-50' 
-              : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-          }`}
-        >
-          <span>{isDbConnected ? 'Gérer / Synchroniser Base Neon' : 'Copier Script SQL Neon & Configurer'}</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setIsNeonModalOpen(true)}
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md font-bold text-[11px] cursor-pointer shadow-xs transition-colors bg-white text-emerald-800 hover:bg-emerald-50"
+          >
+            <span>Gérer / Synchroniser Base Neon</span>
+          </button>
+        </div>
+      ) : (
+        <div className="bg-amber-600 text-white border-b border-amber-700 text-xs py-2 px-4 flex items-center justify-between flex-wrap gap-2 shadow-xs">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-amber-200 shrink-0" />
+            <span>
+              <strong>Mode Stockage Local Résilient Actif</strong> : La base Neon distante n'est pas connectée ({dbInfo.message || 'authentification échouée'}). Vos {records.length} dossiers sont sécurisés localement.
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsNeonModalOpen(true)}
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md font-bold text-[11px] cursor-pointer shadow-xs transition-colors bg-white text-amber-900 hover:bg-amber-50"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Configurer / Reconnecter Neon</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Administrative Header with user profile and tabs */}
       <Header

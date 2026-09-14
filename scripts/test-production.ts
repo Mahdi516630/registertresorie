@@ -3,7 +3,7 @@
  * Exécutable via: npm run test:prod
  */
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.RENDER && process.env.PORT ? process.env.PORT : 3000;
 const BASE_URL = process.env.TEST_APP_URL || `http://localhost:${PORT}`;
 
 interface CheckResult {

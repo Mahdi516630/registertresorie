@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS records (
     num_quittance VARCHAR(128)                         -- N° Quittance Trésor
 );
 
--- Index pour optimiser les requêtes analytiques et de recherche
+-- Index pour optimiser les requêtes analytiques et de recherche (capacité 50 000+ dossiers)
 CREATE INDEX IF NOT EXISTS idx_records_type ON records(record_type);
 CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
 CREATE INDEX IF NOT EXISTS idx_records_serial ON records(num_serial);
@@ -63,6 +63,11 @@ CREATE INDEX IF NOT EXISTS idx_records_name ON records(name);
 CREATE INDEX IF NOT EXISTS idx_records_num_cars ON records(num_cars);
 CREATE INDEX IF NOT EXISTS idx_records_cg_type ON records(cg_type);
 CREATE INDEX IF NOT EXISTS idx_records_pc_type ON records(pc_type);
+CREATE INDEX IF NOT EXISTS idx_records_quittance ON records(num_quittance);
+CREATE INDEX IF NOT EXISTS idx_records_quittance1 ON records(num_quittance1);
+CREATE INDEX IF NOT EXISTS idx_records_quittance2 ON records(num_quittance2);
+CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at);
+CREATE INDEX IF NOT EXISTS idx_records_date_created ON records(date DESC, created_at DESC);
 
 -- 3. Insertion du Super-Administrateur Principal (Mahdi Yacoub Ali)
 -- Si l'e-mail existe déjà, garantit son statut ADMIN et APPROVED

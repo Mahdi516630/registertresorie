@@ -82,6 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
 CREATE INDEX IF NOT EXISTS idx_records_serial ON records(num_serial);
 CREATE INDEX IF NOT EXISTS idx_records_name ON records(name);
 CREATE INDEX IF NOT EXISTS idx_records_num_cars ON records(num_cars);
+CREATE INDEX IF NOT EXISTS idx_records_cg_type ON records(cg_type);
+CREATE INDEX IF NOT EXISTS idx_records_pc_type ON records(pc_type);
+CREATE INDEX IF NOT EXISTS idx_records_quittance ON records(num_quittance);
+CREATE INDEX IF NOT EXISTS idx_records_quittance1 ON records(num_quittance1);
+CREATE INDEX IF NOT EXISTS idx_records_quittance2 ON records(num_quittance2);
+CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at);
+CREATE INDEX IF NOT EXISTS idx_records_date_created ON records(date DESC, created_at DESC);
 
 -- 3. Insertion du Super-Administrateur (Mahdi Yacoub Ali)
 INSERT INTO users (
@@ -115,10 +122,12 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'neon' | 'render'>('render');
+  const [activeTab, setActiveTab] = useState<'neon' | 'render'>('neon');
   const [dbStatus, setDbStatus] = useState<DbStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [seeding, setSeeding] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [inputConnStr, setInputConnStr] = useState('');
+  const [connMessage, setConnMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleCopyText = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -142,6 +151,7 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       checkStatus();
+      setConnMessage(null);
     }
   }, [isOpen]);
 
@@ -152,35 +162,63 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleTestAndInit = async () => {
+  const handleConfigureConnection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputConnStr.trim()) {
+      setConnMessage({ type: 'error', text: 'Veuillez saisir une chaîne de connexion PostgreSQL Neon valide.' });
+      return;
+    }
+
     setLoading(true);
+    setConnMessage(null);
     try {
-      const res = await api.initDb();
+      const res = await api.configureDatabaseUrl(inputConnStr.trim());
       if (res.success) {
-        onShowToast('Connexion Neon vérifiée et tables prêtes !');
+        setConnMessage({ type: 'success', text: res.message });
+        onShowToast('Connexion à PostgreSQL Neon établie avec succès !');
+        setInputConnStr('');
       } else {
-        onShowToast(res.message);
+        setConnMessage({ type: 'error', text: res.message });
+        onShowToast(`Échec: ${res.message}`);
       }
       await checkStatus();
       if (onRefreshData) onRefreshData();
     } catch (e: any) {
+      setConnMessage({ type: 'error', text: e.message || 'Erreur de connexion' });
       onShowToast(`Erreur: ${e.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSeedRecords = async () => {
-    setSeeding(true);
+  const handleSyncToNeon = async () => {
+    setSyncing(true);
     try {
-      const res = await api.seedRecords(currentRecords);
-      onShowToast(res.message || 'Données synchronisées dans PostgreSQL Neon !');
+      const res = await api.syncDatabase();
+      if (res.success) {
+        onShowToast(res.message);
+        await checkStatus();
+        if (onRefreshData) onRefreshData();
+      } else {
+        onShowToast(`Erreur de synchronisation: ${res.message}`);
+      }
+    } catch (e: any) {
+      onShowToast(`Erreur: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleDirectRefresh = async () => {
+    setLoading(true);
+    try {
       await checkStatus();
       if (onRefreshData) onRefreshData();
+      onShowToast('Statut de la base de données actualisé.');
     } catch (e: any) {
-      onShowToast(`Erreur d'envoi: ${e.message}`);
+      onShowToast(`Erreur: ${e.message}`);
     } finally {
-      setSeeding(false);
+      setLoading(false);
     }
   };
 
@@ -293,24 +331,13 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
 
             <div className="flex items-center space-x-2 shrink-0">
               <button
-                onClick={checkStatus}
+                onClick={handleDirectRefresh}
                 disabled={loading}
-                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
+                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                <span>Tester Statut</span>
+                <span>Tester & Actualiser</span>
               </button>
-
-              {isConnected && (
-                <button
-                  onClick={handleSeedRecords}
-                  disabled={seeding}
-                  className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                >
-                  <UploadCloud className={`w-3.5 h-3.5 ${seeding ? 'animate-bounce' : ''}`} />
-                  <span>Transférer Dossiers ({currentRecords.length})</span>
-                </button>
-              )}
             </div>
           </div>
 
@@ -474,6 +501,79 @@ export const NeonDatabaseModal: React.FC<NeonDatabaseModalProps> = ({
           ) : (
             /* TAB: NEON SQL & DDL */
             <div className="space-y-6">
+              {/* Dynamic Connection Form */}
+              <div className="p-4 bg-slate-900 text-white rounded-xl border border-slate-800 shadow-md">
+                <div className="flex items-center space-x-2.5 mb-2">
+                  <div className="p-1.5 rounded-lg bg-blue-600/30 text-blue-400 border border-blue-500/30">
+                    <Database className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold">Configurer ou Mettre à Jour la Connexion Neon</h3>
+                    <p className="text-xs text-slate-400">
+                      Collez directement votre chaîne de connexion (Connection string) PostgreSQL pour vous connecter instantanément.
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleConfigureConnection} className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Chaîne de Connexion PostgreSQL Neon (DATABASE_URL)
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="password"
+                        value={inputConnStr}
+                        onChange={(e) => setInputConnStr(e.target.value)}
+                        placeholder="postgresql://neondb_owner:votre_mot_de_passe@ep-xyz.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+                        className="flex-1 px-3 py-2 text-xs font-mono bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-600"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loading || !inputConnStr.trim()}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center space-x-1.5 shrink-0 cursor-pointer shadow-xs"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                        <span>Tester &amp; Connecter</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {connMessage && (
+                    <div className={`p-2.5 rounded-lg text-xs flex items-center space-x-2 ${
+                      connMessage.type === 'success' 
+                        ? 'bg-emerald-900/50 text-emerald-200 border border-emerald-700/50' 
+                        : 'bg-rose-900/50 text-rose-200 border border-rose-700/50'
+                    }`}>
+                      {connMessage.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      )}
+                      <span>{connMessage.text}</span>
+                    </div>
+                  )}
+
+                  {isConnected && (
+                    <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <div className="text-xs text-emerald-400 flex items-center space-x-1.5">
+                        <Check className="w-4 h-4" />
+                        <span>Base de données connectée. Vos données sont synchronisées.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSyncToNeon}
+                        disabled={syncing}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                      >
+                        <UploadCloud className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                        <span>{syncing ? 'Synchronisation...' : 'Synchroniser le stockage local vers Neon'}</span>
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </div>
+
               {/* Step-by-Step Instructions */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
