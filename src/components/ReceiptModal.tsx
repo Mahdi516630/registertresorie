@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { RegistryRecord, CGRecord, PCRecord } from '../types';
 import { formatCurrency, formatDateFR } from '../utils/formatters';
+import { AppLogo } from './AppLogo';
 
 export interface ReceiptModalProps {
   isOpen: boolean;
@@ -141,9 +142,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         {/* Top Action Toolbar (Non-printable) */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 border-b border-slate-200 print:hidden select-none">
           <div className="flex items-center space-x-2.5">
-            <div className="p-1.5 rounded-lg bg-blue-100 text-blue-800">
-              <ShieldCheck className="w-5 h-5 text-blue-700" />
-            </div>
+            <AppLogo size="sm" />
             <div>
               <h2 id="receipt-dialog-title" className="text-xs font-bold text-slate-800 tracking-tight flex items-center gap-1.5">
                 <span>Fiche & Quittance Officielle</span>
@@ -226,6 +225,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
           {/* Official Document Header */}
           <div className="text-center border-b-2 border-slate-900 pb-4 mb-5">
+            <div className="flex justify-center mb-2">
+              <AppLogo size="sm" />
+            </div>
             <div className="flex items-center justify-center space-x-3 mb-1">
               <span className="h-0.5 w-10 bg-slate-400 inline-block"></span>
               <h2 className="text-xs font-extrabold uppercase tracking-widest text-slate-600">

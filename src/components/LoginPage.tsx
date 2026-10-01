@@ -19,6 +19,7 @@ import {
 import { AppUser } from '../types';
 import { ADMIN_EMAIL, ADMIN_DEFAULT_PASS } from '../data/initialUsers';
 import { api } from '../services/api';
+import { AppLogo } from './AppLogo';
 
 interface LoginPageProps {
   onLogin: (user: AppUser) => void;
@@ -185,9 +186,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         {/* Official Header branding */}
         <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-700 text-white flex items-center justify-center shadow-xl shadow-blue-500/30 border border-blue-400/30">
-            <ShieldCheck className="w-10 h-10 text-white" />
-          </div>
+          <AppLogo size="lg" />
         </div>
 
         <h2 className="mt-4 text-center text-xl sm:text-2xl font-extrabold text-white tracking-tight">

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { RecordType, AppUser } from '../types';
 import { formatCurrency } from '../utils/formatters';
+import { AppLogo } from './AppLogo';
 
 interface HeaderProps {
   currentTab: 'register' | 'analytics' | 'users';
@@ -64,11 +65,9 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Logo & Administrative branding */}
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-700 to-indigo-900 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
-              <ShieldCheck className="w-7 h-7 text-blue-100" />
-            </div>
+            <AppLogo size="md" />
             <div>
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
                   Registre CG & PC
                 </h1>

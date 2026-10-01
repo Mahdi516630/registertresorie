@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient: Djibouti Navy to Royal Indigo -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f2b5c" />
+      <stop offset="50%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#0c1e40" />
+    </linearGradient>
+
+    <!-- Shield Border Glow -->
+    <linearGradient id="shieldBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="50%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+
+    <!-- Gold Accent Gradient -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#facc15" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+
+    <!-- Green Emerald Accent -->
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+
+    <!-- Drop Shadow Filters -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Base Rounded Squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Outer Protective Shield Outline with Gradient -->
+  <path d="M 256,58 C 344,58 412,86 412,86 C 412,246 348,374 256,438 C 164,374 100,246 100,86 C 100,86 168,58 256,58 Z" 
+        fill="#0b1b36" 
+        stroke="url(#shieldBorder)" 
+        stroke-width="12" 
+        stroke-linejoin="round"
+        filter="url(#dropShadow)" />
+
+  <!-- Shield Top Star (National Star of Djibouti) -->
+  <g transform="translate(256, 126)">
+    <!-- Star Glow -->
+    <circle r="36" fill="#ef4444" opacity="0.25" filter="url(#softGlow)" />
+    <!-- Red Five-Pointed Star -->
+    <polygon points="0,-26 7.8,-8 26.6,-8 11.4,3.2 17.2,21.6 0,9.6 -17.2,21.6 -11.4,3.2 -26.6,-8 -7.8,-8" 
+             fill="#dc2626" 
+             stroke="#ffffff" 
+             stroke-width="2.5" 
+             stroke-linejoin="round" />
+  </g>
+
+  <!-- Left Side: Carte Grise (Automobile Motif) -->
+  <g transform="translate(196, 252)">
+    <!-- Car Body -->
+    <path d="M -70,22 
+             C -68,14 -60,6 -50,6 
+             L -30,6 
+             L -15,-20 
+             C -12,-26 -4,-30 4,-30 
+             L 50,-30 
+             C 58,-30 64,-26 68,-20 
+             L 82,6 
+             L 94,6 
+             C 102,6 108,12 108,20 
+             L 108,34 
+             C 108,38 104,42 100,42 
+             L 94,42 
+             C 94,34 86,26 76,26 
+             C 66,26 58,34 58,42 
+             L -18,42 
+             C -18,34 -26,26 -36,26 
+             C -46,26 -54,34 -54,42 
+             L -66,42 
+             C -70,42 -74,38 -74,34 
+             Z" 
+          fill="#38bdf8" 
+          filter="url(#dropShadow)" />
+
+    <!-- Car Windows -->
+    <path d="M -10,-18 L -24,4 L 14,4 L 14,-22 L 4,-22 C 0,-22 -6,-20 -10,-18 Z" fill="#0f2b5c" />
+    <path d="M 24,-22 L 24,4 L 72,4 L 60,-18 C 58,-21 54,-22 50,-22 Z" fill="#0f2b5c" />
+
+    <!-- Car Wheels -->
+    <circle cx="-36" cy="42" r="14" fill="#0b1324" stroke="#60a5fa" stroke-width="4" />
+    <circle cx="-36" cy="42" r="5" fill="#ffffff" />
+    <circle cx="76" cy="42" r="14" fill="#0b1324" stroke="#60a5fa" stroke-width="4" />
+    <circle cx="76" cy="42" r="5" fill="#ffffff" />
+    
+    <!-- Headlight -->
+    <polygon points="98,18 106,18 102,26 96,26" fill="#fef08a" />
+  </g>
+
+  <!-- Right Side: Permis de Conduire (Biometric Smart Card & Chip) -->
+  <g transform="translate(320, 290)">
+    <!-- ID Card Base with Green/Gold Accent -->
+    <rect x="-60" y="-42" width="120" height="84" rx="10" 
+          fill="#ffffff" 
+          stroke="url(#greenGrad)" 
+          stroke-width="5" 
+          filter="url(#dropShadow)" />
+    
+    <!-- Header Stripe of Card -->
+    <path d="M -58,-32 C -58,-38 -54,-40 -48,-40 L 48,-40 C 54,-40 58,-38 58,-32 L 58,-22 L -58,-22 Z" 
+          fill="#10b981" />
+    
+    <!-- User Avatar Silhouette -->
+    <circle cx="-32" cy="-2" r="11" fill="#0284c7" />
+    <path d="M -46,24 C -46,14 -38,13 -32,13 C -26,13 -18,14 -18,24 Z" fill="#0284c7" />
+
+    <!-- Card Data Lines -->
+    <line x1="-8" y1="-8" x2="44" y2="-8" stroke="#1e293b" stroke-width="4.5" stroke-linecap="round" />
+    <line x1="-8" y1="2" x2="36" y2="2" stroke="#64748b" stroke-width="3.5" stroke-linecap="round" />
+    <line x1="-8" y1="12" x2="28" y2="12" stroke="#64748b" stroke-width="3.5" stroke-linecap="round" />
+
+    <!-- Gold Smart Chip Emblem -->
+    <rect x="26" y="16" width="18" height="14" rx="3" fill="url(#goldGrad)" stroke="#ca8a04" stroke-width="1.5" />
+    <line x1="35" y1="16" x2="35" y2="30" stroke="#ca8a04" stroke-width="1" />
+    <line x1="26" y1="23" x2="44" y2="23" stroke="#ca8a04" stroke-width="1" />
+  </g>
+
+  <!-- Bottom Badge: "CG • PC" in Bold Gold Banner -->
+  <g transform="translate(256, 388)">
+    <rect x="-82" y="-18" width="164" height="36" rx="18" 
+          fill="#0f172a" 
+          stroke="url(#goldGrad)" 
+          stroke-width="3.5" 
+          filter="url(#dropShadow)" />
+    <text x="0" y="7" 
+          font-family="system-ui, -apple-system, sans-serif" 
+          font-size="19" 
+          font-weight="900" 
+          fill="#fef08a" 
+          letter-spacing="3" 
+          text-anchor="middle">
+      CG • PC
+    </text>
+  </g>
+</svg>
