@@ -1,0 +1,52 @@
+[
+  {
+    "id": "rec-cg-sample-1",
+    "recordType": "CG",
+    "numSerial": "100001",
+    "name": "Mohamed Ali Hassan",
+    "montant": 33500,
+    "date": "2026-03-01",
+    "createdAt": "2026-03-01T08:30:00.000Z",
+    "notes": "Première immatriculation véhicule tourisme",
+    "cv": 7,
+    "type": "NORMAL",
+    "numCars": "DJ-12345-A",
+    "montantCV": 31500,
+    "montantDossier": 2000,
+    "numQuittance1": "Q-2026-00124",
+    "numQuittance2": "Q-2026-00125"
+  },
+  {
+    "id": "rec-pc-sample-1",
+    "recordType": "PC",
+    "numSerial": "200001",
+    "name": "Amina Ahmed Farah",
+    "montant": 14000,
+    "date": "2026-03-02",
+    "createdAt": "2026-03-02T09:15:00.000Z",
+    "notes": "Délivrance initiale permis catégorie B et A",
+    "type": "NORMAL",
+    "categories": [
+      "A",
+      "B"
+    ],
+    "numQuittance": "Q-2026-00189"
+  },
+  {
+    "id": "rec-cg-sample-2",
+    "recordType": "CG",
+    "numSerial": "100002",
+    "name": "Ibrahim Omar Guelleh",
+    "montant": 15000,
+    "date": "2026-03-03",
+    "createdAt": "2026-03-03T10:00:00.000Z",
+    "notes": "Duplicata suite à perte carte grise",
+    "cv": 6,
+    "type": "DUPLICATA",
+    "numCars": "DJ-98765-B",
+    "montantCV": 13500,
+    "montantDossier": 1500,
+    "numQuittance1": "Q-2026-00210",
+    "numQuittance2": "Q-2026-00211"
+  }
+]

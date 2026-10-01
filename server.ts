@@ -760,19 +760,41 @@ async function startServer() {
   // ----------------------------------------------------
   // Vite Middleware (Development) / Static Files (Production)
   // ----------------------------------------------------
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const indexHtmlPath = path.join(distPath, 'index.html');
+  const hasDistBuild = fs.existsSync(indexHtmlPath);
+
+  if (process.env.NODE_ENV === 'production' && hasDistBuild) {
+    app.use(express.static(distPath));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(indexHtmlPath, (err) => {
+        if (err) {
+          next(err);
+        }
+      });
+    });
+  } else {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
+
+  // Global Error Handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Unhandled server error:', err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({
+      error: 'Erreur interne du serveur',
+      message: err?.message || 'Une erreur imprévue est survenue'
+    });
+  });
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${PORT} (Node ${process.version}, ${process.env.NODE_ENV || 'development'})`);
