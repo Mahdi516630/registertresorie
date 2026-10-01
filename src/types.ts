@@ -22,6 +22,7 @@ export interface PCRecord extends BaseRecord {
   categorie?: PCCategory; // Backward-compatible single category
   type: PCType;
   numQuittance: string;
+  numIdentite?: string; // Numéro d'identité (CNI / NNI / Passeport) pour le PC seulement
 }
 
 export interface CGRecord extends BaseRecord {

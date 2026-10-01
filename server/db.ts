@@ -152,8 +152,14 @@ export async function initDatabase(): Promise<{ success: boolean; message: strin
           num_quittance2 VARCHAR(128),
           pc_type VARCHAR(32),
           categories TEXT[] DEFAULT '{}',
-          num_quittance VARCHAR(128)
+          num_quittance VARCHAR(128),
+          num_identite VARCHAR(128)
         );
+      `);
+
+      // Ensure backward-compatible column migration
+      await client.query(`
+        ALTER TABLE records ADD COLUMN IF NOT EXISTS num_identite VARCHAR(128);
       `);
 
       // 3. Ensure high-performance indexes
@@ -172,6 +178,7 @@ export async function initDatabase(): Promise<{ success: boolean; message: strin
         CREATE INDEX IF NOT EXISTS idx_records_quittance ON records(num_quittance);
         CREATE INDEX IF NOT EXISTS idx_records_quittance1 ON records(num_quittance1);
         CREATE INDEX IF NOT EXISTS idx_records_quittance2 ON records(num_quittance2);
+        CREATE INDEX IF NOT EXISTS idx_records_num_identite ON records(num_identite);
         CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at);
         CREATE INDEX IF NOT EXISTS idx_records_date_created ON records(date DESC, created_at DESC);
       `);
@@ -264,14 +271,15 @@ export async function syncLocalToNeon(): Promise<{ success: boolean; recordsCoun
         INSERT INTO records (
           id, record_type, num_serial, name, montant, date, created_at, notes,
           cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
-          pc_type, categories, num_quittance
+          pc_type, categories, num_quittance, num_identite
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         ON CONFLICT (id) DO UPDATE SET
           montant = EXCLUDED.montant,
           date = EXCLUDED.date,
           name = EXCLUDED.name,
-          notes = EXCLUDED.notes;
+          notes = EXCLUDED.notes,
+          num_identite = EXCLUDED.num_identite;
       `;
 
       const anyR = record as any;
@@ -294,6 +302,7 @@ export async function syncLocalToNeon(): Promise<{ success: boolean; recordsCoun
         record.type && record.recordType === 'PC' ? record.type : null,
         anyR.categories || [],
         anyR.numQuittance || null,
+        record.recordType === 'PC' ? (anyR.numIdentite || null) : null,
       ];
 
       await client.query(query, values);
@@ -390,6 +399,7 @@ export function mapRowToRecord(row: any): any {
       type: row.pc_type || 'NORMAL',
       categories: Array.isArray(row.categories) ? row.categories : (row.categories ? [row.categories] : ['B']),
       numQuittance: row.num_quittance || '',
+      numIdentite: row.num_identite || '',
     };
   }
 }

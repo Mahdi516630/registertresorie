@@ -67,4 +67,23 @@ describe('TDD: Validations et Formateurs du Registre', () => {
       expect(q).toMatch(/^Q-\d{4}-\d{5}$/);
     });
   });
+
+  describe('Validation du Champ Numéro d’Identité (numIdentite pour PC seulement)', () => {
+    it('doit supporter le champ numIdentite pour les permis de conduire', () => {
+      const pc = createMockPCRecord({
+        numIdentite: '0102030405',
+      });
+      expect(pc.recordType).toBe('PC');
+      expect((pc as any).numIdentite).toBe('0102030405');
+    });
+
+    it('la Carte Grise (CG) ne contient pas de champ numIdentite obligatoire', () => {
+      const cg = createMockCGRecord({
+        numCars: 'DK-1002-AA',
+        cv: 7,
+      });
+      expect(cg.recordType).toBe('CG');
+      expect((cg as any).numIdentite).toBeUndefined();
+    });
+  });
 });

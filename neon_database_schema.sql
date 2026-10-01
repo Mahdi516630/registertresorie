@@ -52,12 +52,17 @@ CREATE TABLE IF NOT EXISTS records (
     -- Colonnes spécifiques aux Permis de Conduire (PC)
     pc_type VARCHAR(32),                               -- 'NORMAL' ou 'DUPLICATA'
     categories TEXT[] DEFAULT '{}',                    -- Catégories de permis (ex: ARRAY['A', 'B'])
-    num_quittance VARCHAR(128)                         -- N° Quittance Trésor
+    num_quittance VARCHAR(128),                        -- N° Quittance Trésor
+    num_identite VARCHAR(128)                          -- N° Identité / CNI / NNI / Passeport (PC uniquement)
 );
+
+-- Rétrocompatibilité si la table existe déjà
+ALTER TABLE records ADD COLUMN IF NOT EXISTS num_identite VARCHAR(128);
 
 -- Index pour optimiser les requêtes analytiques et de recherche (capacité 50 000+ dossiers)
 CREATE INDEX IF NOT EXISTS idx_records_type ON records(record_type);
 CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
+CREATE INDEX IF NOT EXISTS idx_records_num_identite ON records(num_identite);
 CREATE INDEX IF NOT EXISTS idx_records_serial ON records(num_serial);
 CREATE INDEX IF NOT EXISTS idx_records_name ON records(name);
 CREATE INDEX IF NOT EXISTS idx_records_num_cars ON records(num_cars);

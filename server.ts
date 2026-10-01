@@ -160,7 +160,8 @@ async function startServer() {
               LOWER(COALESCE(num_cars, '')) LIKE $${paramIdx} OR 
               LOWER(COALESCE(num_quittance, '')) LIKE $${paramIdx} OR 
               LOWER(COALESCE(num_quittance1, '')) LIKE $${paramIdx} OR 
-              LOWER(COALESCE(num_quittance2, '')) LIKE $${paramIdx}
+              LOWER(COALESCE(num_quittance2, '')) LIKE $${paramIdx} OR
+              LOWER(COALESCE(num_identite, '')) LIKE $${paramIdx}
             )`);
             params.push(q);
             paramIdx++;
@@ -220,7 +221,8 @@ async function startServer() {
             (anyR.numCars && anyR.numCars.toLowerCase().includes(s)) ||
             (anyR.numQuittance && anyR.numQuittance.toLowerCase().includes(s)) ||
             (anyR.numQuittance1 && anyR.numQuittance1.toLowerCase().includes(s)) ||
-            (anyR.numQuittance2 && anyR.numQuittance2.toLowerCase().includes(s))
+            (anyR.numQuittance2 && anyR.numQuittance2.toLowerCase().includes(s)) ||
+            (anyR.numIdentite && anyR.numIdentite.toLowerCase().includes(s))
           );
         });
       }
@@ -310,14 +312,15 @@ async function startServer() {
             INSERT INTO records (
               id, record_type, num_serial, name, montant, date, created_at, notes,
               cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
-              pc_type, categories, num_quittance
+              pc_type, categories, num_quittance, num_identite
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ON CONFLICT (id) DO UPDATE SET
               montant = EXCLUDED.montant,
               date = EXCLUDED.date,
               name = EXCLUDED.name,
-              notes = EXCLUDED.notes
+              notes = EXCLUDED.notes,
+              num_identite = EXCLUDED.num_identite
             RETURNING *;
           `;
 
@@ -341,6 +344,7 @@ async function startServer() {
             record.type && record.recordType === 'PC' ? record.type : null,
             anyRec.categories || [],
             anyRec.numQuittance || null,
+            record.recordType === 'PC' ? (anyRec.numIdentite || null) : null,
           ];
 
           const result = await pool.query(query, values);
@@ -390,7 +394,8 @@ async function startServer() {
               num_quittance2 = $14,
               pc_type = $15,
               categories = $16,
-              num_quittance = $17
+              num_quittance = $17,
+              num_identite = $18
             WHERE id = $1
             RETURNING *;
           `;
@@ -414,6 +419,7 @@ async function startServer() {
             updatedRecord.type && updatedRecord.recordType === 'PC' ? updatedRecord.type : null,
             anyUpdated.categories || [],
             anyUpdated.numQuittance || null,
+            updatedRecord.recordType === 'PC' ? (anyUpdated.numIdentite || null) : null,
           ];
 
           const result = await pool.query(query, values);
@@ -480,14 +486,15 @@ async function startServer() {
                 INSERT INTO records (
                   id, record_type, num_serial, name, montant, date, created_at, notes,
                   cv, cg_type, num_cars, montant_cv, montant_dossier, num_quittance1, num_quittance2,
-                  pc_type, categories, num_quittance
+                  pc_type, categories, num_quittance, num_identite
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 ON CONFLICT (id) DO UPDATE SET
                   montant = EXCLUDED.montant,
                   date = EXCLUDED.date,
                   name = EXCLUDED.name,
-                  notes = EXCLUDED.notes;
+                  notes = EXCLUDED.notes,
+                  num_identite = EXCLUDED.num_identite;
               `;
 
               const values = [
@@ -509,6 +516,7 @@ async function startServer() {
                 record.type && record.recordType === 'PC' ? record.type : null,
                 record.categories || [],
                 record.numQuittance || null,
+                record.recordType === 'PC' ? (record.numIdentite || null) : null,
               ];
 
               await client.query(query, values);

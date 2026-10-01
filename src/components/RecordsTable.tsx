@@ -82,6 +82,7 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
         let matchesCars = false;
         let matchesQuittance = false;
         let matchesCategory = false;
+        let matchesIdentite = false;
 
         if (r.recordType === 'CG') {
           const cg = r as CGRecord;
@@ -96,9 +97,10 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
           matchesQuittance = !!pc.numQuittance && pc.numQuittance.toLowerCase().includes(q);
           const cats = pc.categories || (pc.categorie ? [pc.categorie] : []);
           matchesCategory = cats.some((c) => c.toLowerCase().includes(q));
+          matchesIdentite = !!pc.numIdentite && pc.numIdentite.toLowerCase().includes(q);
         }
 
-        if (!matchesSerial && !matchesName && !matchesCars && !matchesQuittance && !matchesCategory) {
+        if (!matchesSerial && !matchesName && !matchesCars && !matchesQuittance && !matchesCategory && !matchesIdentite) {
           return false;
         }
       }
@@ -437,6 +439,14 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
                     <ArrowUpDown className="w-3 h-3 text-slate-400" />
                   </div>
                 </th>
+                <th className="py-3 px-3">
+                  <div className="flex items-center space-x-1">
+                    <span>N° Identité</span>
+                    <span className="text-[10px] text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full font-bold">
+                      PC
+                    </span>
+                  </div>
+                </th>
                 <th className="py-3 px-3">Détails Spécifiques</th>
                 <th className="py-3 px-3">Opération</th>
                 <th className="py-3 px-3">N° Quittance</th>
@@ -483,7 +493,14 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
 
                       {/* Num Serial */}
                       <td className="py-3 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                        {r.numSerial}
+                        <button
+                          type="button"
+                          onClick={() => onViewReceipt(r)}
+                          title="Cliquer pour consulter et imprimer la fiche / quittance officielle"
+                          className="hover:text-blue-600 hover:underline cursor-pointer inline-flex items-center gap-1 group font-mono font-bold text-slate-900 text-left"
+                        >
+                          <span>{r.numSerial}</span>
+                        </button>
                       </td>
 
                       {/* Date */}
@@ -500,6 +517,26 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
                           <div className="text-[10px] text-slate-400 truncate max-w-[180px]">
                             {r.notes}
                           </div>
+                        )}
+                      </td>
+
+                      {/* Num Identité (PC seulement) */}
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        {!isCG && pc ? (
+                          pc.numIdentite ? (
+                            <span className="font-mono font-bold text-[11px] text-emerald-950 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block shadow-2xs">
+                              {pc.numIdentite}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">-</span>
+                          )
+                        ) : (
+                          <span 
+                            title="Non applicable pour la Carte Grise" 
+                            className="text-slate-300 font-mono text-xs select-none"
+                          >
+                            —
+                          </span>
                         )}
                       </td>
 
@@ -611,14 +648,16 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
 
                       {/* Actions */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center space-x-1">
+                        <div className="flex items-center justify-center space-x-1.5">
+                          {/* Upgraded View & Print Button */}
                           <button
                             type="button"
-                            title="Voir et Imprimer la Quittance / Fiche"
+                            title="Voir et Imprimer la Quittance / Fiche Officielle"
                             onClick={() => onViewReceipt(r)}
-                            className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            className="inline-flex items-center space-x-1 px-2 py-1 rounded-md text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-900 border border-blue-200 transition-all shadow-2xs group cursor-pointer"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5 text-blue-600 group-hover:scale-110 transition-transform" />
+                            <span>Voir</span>
                           </button>
                           <button
                             type="button"
@@ -643,7 +682,7 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
                 })
               ) : (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500">
+                  <td colSpan={10} className="py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center space-y-3">
                       <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
                         <FileText className="w-6 h-6" />

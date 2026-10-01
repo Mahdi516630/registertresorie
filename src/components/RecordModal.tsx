@@ -94,6 +94,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [pcCategories, setPcCategories] = useState<PCCategory[]>(['B']);
   const [pcType, setPcType] = useState<PCType>('NORMAL');
   const [pcNumQuittance, setPcNumQuittance] = useState<string>('');
+  const [numIdentite, setNumIdentite] = useState<string>('');
 
   // Form error tracking
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -126,6 +127,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         setPcCategories(cats);
         setPcType(pc.type);
         setPcNumQuittance(pc.numQuittance || '');
+        setNumIdentite(pc.numIdentite || '');
       }
     } else {
       // New record mode: Fields start completely empty (no auto-generated text)
@@ -150,6 +152,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         setPcType('NORMAL');
         setMontant(calculatePCAmount(1, 'NORMAL'));
         setPcNumQuittance('');
+        setNumIdentite('');
       }
     }
     setErrors({});
@@ -265,12 +268,15 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         }
       }
     } else {
-      // PC: At least 1 category selected, 1 quittance required
+      // PC: At least 1 category selected, 1 quittance required, numIdentite required
       if (pcCategories.length === 0) {
         newErrors.pcCategories = 'Veuillez sélectionner au moins une catégorie de permis';
       }
       if (!pcNumQuittance.trim()) {
         newErrors.pcNumQuittance = 'Le numéro de quittance est obligatoire pour le Permis de Conduire';
+      }
+      if (!numIdentite.trim()) {
+        newErrors.numIdentite = 'Le numéro d’identité (NUM_IDENTITE) est obligatoire pour le Permis de Conduire';
       }
     }
 
@@ -321,6 +327,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         type: pcType,
         montant: Number(montant) || 0,
         numQuittance: pcNumQuittance.trim(),
+        numIdentite: numIdentite.trim(),
         date,
         createdAt: editingRecord ? editingRecord.createdAt : new Date().toISOString(),
         notes: notes.trim(),
@@ -906,34 +913,61 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                 </div>
               </div>
 
-              {/* NUM_QUITTANCE for PC */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    NUM_QUITTANCE (Quittance de Paiement PC) *
+              {/* NUM_IDENTITE (PC SEULEMENT) & NUM_QUITTANCE */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* NUM_IDENTITE */}
+                <div>
+                  <label htmlFor="field-pc-num-identite" className="block text-xs font-semibold text-slate-700 mb-1">
+                    NUM_IDENTITE (N° Identité / CNI / Passeport) *
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setPcNumQuittance(generateQuittanceNumber('Q-PC'))}
-                    className="text-[11px] text-emerald-600 hover:underline inline-flex items-center space-x-1 font-medium"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Générer reçu</span>
-                  </button>
+                  <input
+                    type="text"
+                    id="field-pc-num-identite"
+                    value={numIdentite}
+                    onChange={(e) => setNumIdentite(e.target.value)}
+                    placeholder="Ex: 0102030405 ou CNI-DJ-987654"
+                    className={`w-full text-sm rounded-lg border px-3 py-2 font-mono uppercase bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500 ${
+                      errors.numIdentite ? 'border-red-500 bg-red-50/50' : 'border-slate-300'
+                    }`}
+                  />
+                  {errors.numIdentite ? (
+                    <p className="text-[11px] text-red-600 mt-1">{errors.numIdentite}</p>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Numéro de pièce d'identité du titulaire (PC uniquement)
+                    </p>
+                  )}
                 </div>
-                <input
-                  type="text"
-                  id="field-pc-quittance"
-                  value={pcNumQuittance}
-                  onChange={(e) => setPcNumQuittance(e.target.value)}
-                  placeholder="Ex: Q-2026-10492"
-                  className={`w-full text-sm rounded-lg border px-3 py-2 font-mono uppercase bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500 ${
-                    errors.pcNumQuittance ? 'border-red-500 bg-red-50/50' : 'border-slate-300'
-                  }`}
-                />
-                {errors.pcNumQuittance && (
-                  <p className="text-[11px] text-red-600 mt-1">{errors.pcNumQuittance}</p>
-                )}
+
+                {/* NUM_QUITTANCE for PC */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="field-pc-quittance" className="block text-xs font-semibold text-slate-700">
+                      NUM_QUITTANCE (Quittance de Paiement PC) *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setPcNumQuittance(generateQuittanceNumber('Q-PC'))}
+                      className="text-[11px] text-emerald-600 hover:underline inline-flex items-center space-x-1 font-medium"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Générer</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    id="field-pc-quittance"
+                    value={pcNumQuittance}
+                    onChange={(e) => setPcNumQuittance(e.target.value)}
+                    placeholder="Ex: Q-2026-10492"
+                    className={`w-full text-sm rounded-lg border px-3 py-2 font-mono uppercase bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500 ${
+                      errors.pcNumQuittance ? 'border-red-500 bg-red-50/50' : 'border-slate-300'
+                    }`}
+                  />
+                  {errors.pcNumQuittance && (
+                    <p className="text-[11px] text-red-600 mt-1">{errors.pcNumQuittance}</p>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -633,6 +633,12 @@ export default function App() {
           }}
           record={receiptRecord}
           currency={currency}
+          onEdit={(rec) => {
+            setIsReceiptModalOpen(false);
+            setReceiptRecord(null);
+            handleEditRecord(rec);
+          }}
+          currentUserName={currentUser?.name}
         />
       )}
 
