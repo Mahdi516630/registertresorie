@@ -70,9 +70,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   // Rule: LE NUMERO DE SERIE EST UN NUM DE 6 CHIFFRE POUR LE PC ET CG
   const [numSerial, setNumSerial] = useState<string>('');
   const [name, setName] = useState<string>('');
-  const [date, setDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+  const [date, setDate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
   // CG specific fields
@@ -134,7 +132,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       setRecordType(initialType);
       setNumSerial('');
       setName('');
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate('');
       setNotes('');
 
       if (initialType === 'CG') {
